@@ -8,6 +8,8 @@ from library.ingest import ingest
 from library.models import Book, Delivery, Device, User
 from library.testutils import TempStorage, make_epub
 
+from .views import _tracked
+
 ATOM = "{http://www.w3.org/2005/Atom}"
 
 
@@ -153,7 +155,7 @@ class AcquisitionTests(OpdsTestCase):
         self.assertEqual(response["Content-Length"], str(book.size))
         self.assertEqual(response["ETag"], f'"{book.sha256}"')
         self.assertNotIn("Transfer-Encoding", response)
-        self.assertIn("Downloadable.epub", response["Content-Disposition"])
+        self.assertIn('filename="b.epub"', response["Content-Disposition"])
 
         self.assertFalse(Delivery.objects.exists(), "not delivered until bytes leave")
         body = b"".join(response.streaming_content)
@@ -165,13 +167,24 @@ class AcquisitionTests(OpdsTestCase):
     def test_abandoned_download_stays_in_the_inbox(self):
         book = self.add_book("Interrupted")
         response = self.client.get(f"/opds/book/{book.pk}.epub", headers=self.auth)
-        stream = response.streaming_content
-        next(stream)          # one chunk, then the reader drops the connection
+        # The reader drops the connection after one chunk: the WSGI server stops
+        # iterating and closes the body, so the tracking generator never finishes.
+        stream = _tracked(
+            iter([b"a" * 100, b"b" * 100]), book.size, book.pk, self.device.pk
+        )
+        next(stream)
         stream.close()
+        response.close()
 
         self.assertFalse(Delivery.objects.exists())
         root, _ = self.feed("/opds/inbox/")
         self.assertEqual(self.titles(root), ["Interrupted"])
+
+    def test_truncated_body_is_not_a_delivery(self):
+        book = self.add_book("Cut short")
+        stream = _tracked(iter([b"only some bytes"]), book.size, book.pk, self.device.pk)
+        list(stream)
+        self.assertFalse(Delivery.objects.exists())
 
     def test_repeat_download_is_idempotent(self):
         book = self.add_book("Twice")
