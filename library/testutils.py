@@ -1,9 +1,39 @@
 """Builds real EPUB bytes for tests — the pipeline only trusts real bytes."""
 
 import io
+import secrets
+import tempfile
 import zipfile
+from pathlib import Path
 
+from django.test import override_settings
 from PIL import Image
+
+
+class TempStorage:
+    """Point the volume at a throwaway directory for the duration of a class."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls._tmpdir = tempfile.TemporaryDirectory()
+        root = Path(cls._tmpdir.name)
+        for name in ("books", "covers", "tmp"):
+            (root / name).mkdir()
+        cls._storage_override = override_settings(
+            DATA_DIR=root,
+            BOOKS_DIR=root / "books",
+            COVERS_DIR=root / "covers",
+            TMP_DIR=root / "tmp",
+            FILE_UPLOAD_TEMP_DIR=str(root / "tmp"),
+        )
+        cls._storage_override.enable()
+        super().setUpClass()
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        cls._storage_override.disable()
+        cls._tmpdir.cleanup()
 
 CONTAINER = """<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -57,9 +87,11 @@ def make_epub(
         )
         zf.writestr("META-INF/container.xml", CONTAINER)
         zf.writestr("OEBPS/content.opf", _opf(title, author, series, seq, with_cover))
+        # Padding is random so it survives deflate — size tests need real bytes.
+        filler = secrets.token_hex(max(padding, 0) // 2)
         zf.writestr(
             "OEBPS/chapter.xhtml",
-            f"<html><body><h1>{title}</h1><p>{'x' * padding}</p></body></html>",
+            f"<html><body><h1>{title}</h1><p>{filler}</p></body></html>",
         )
         if with_cover:
             image = Image.new("RGB", (600, 900), (120, 60, 30))

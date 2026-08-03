@@ -59,13 +59,21 @@ def check_magic(head: bytes) -> None:
         raise EpubError("Not a zip archive — EPUB files start with PK.")
 
 
-def open_epub(path) -> zipfile.ZipFile:
-    """Open and structurally validate. The caller closes the returned handle."""
-    with open(path, "rb") as fh:
-        check_magic(fh.read(4))
+def open_epub(source) -> zipfile.ZipFile:
+    """Open and structurally validate a path or file object.
+
+    The caller closes the returned handle.
+    """
+    if hasattr(source, "read"):
+        source.seek(0)
+        check_magic(source.read(4))
+        source.seek(0)
+    else:
+        with open(source, "rb") as fh:
+            check_magic(fh.read(4))
 
     try:
-        zf = zipfile.ZipFile(path)
+        zf = zipfile.ZipFile(source)
     except zipfile.BadZipFile as exc:
         raise EpubError("Damaged zip archive.") from exc
 
