@@ -168,6 +168,47 @@ class DeviceTests(TestCase):
         self.assertEqual(len(names), 5)
 
 
+class SweepTmpTests(TempStorage, TestCase):
+    def test_only_old_fragments_are_swept(self):
+        import os
+        import time
+
+        stale = settings.TMP_DIR / "stale.part"
+        fresh = settings.TMP_DIR / "fresh.part"
+        stale.write_bytes(b"x")
+        fresh.write_bytes(b"x")
+        old = time.time() - 48 * 3600
+        os.utime(stale, (old, old))
+
+        call_command("sweep_tmp", stdout=io.StringIO())
+        self.assertFalse(stale.exists())
+        self.assertTrue(fresh.exists())
+
+
+class BackupTests(TempStorage, TransactionTestCase):
+    def test_backup_writes_a_usable_snapshot_and_a_blob_tar(self):
+        import sqlite3
+        import tarfile
+
+        user = User.objects.create_user("reader", password="x")
+        ingest(user, upload_file(title="Backed up"))
+
+        with self.settings(BACKUP_DIR=settings.DATA_DIR / "backup"):
+            call_command("backup", stdout=io.StringIO())
+            snapshots = sorted((settings.DATA_DIR / "backup").glob("library-*.db"))
+            tars = sorted((settings.DATA_DIR / "backup").glob("books-*.tar"))
+
+            self.assertEqual(len(snapshots), 1)
+            connection = sqlite3.connect(snapshots[0])
+            count = connection.execute("SELECT count(*) FROM library_book").fetchone()
+            connection.close()
+            self.assertEqual(count[0], 1)
+
+            self.assertEqual(len(tars), 1)
+            with tarfile.open(tars[0]) as tar:
+                self.assertTrue(any(n.startswith("books/") for n in tar.getnames()))
+
+
 def _container(opf_path):
     return f"""<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
