@@ -1,0 +1,55 @@
+{% extends "web/base.html" %}
+{% block title %}Devices{% endblock %}
+
+{% block content %}
+<h1>Devices</h1>
+<p class="lede">Each reader gets its own username and password, so one that is lost or handed on can be revoked on its own. Your Inbox is tracked per device.</p>
+
+{% include "web/_credential.html" %}
+
+<div class="card">
+  <h2>Add a device</h2>
+  <form method="post" class="inline">
+    {% csrf_token %}
+    {{ form.name }}
+    <button type="submit">Create credentials</button>
+  </form>
+  {% if form.errors %}<p class="flash error">{{ form.name.errors.0 }}</p>{% endif %}
+</div>
+
+{% if devices %}
+<table class="devices">
+  <thead><tr><th>Device</th><th>Username</th><th>Last seen</th><th>Delivered</th><th></th></tr></thead>
+  <tbody>
+  {% for device in devices %}
+    <tr>
+      <td>
+        <form method="post" action="{% url 'device_rename' device.pk %}" class="rename">
+          {% csrf_token %}
+          <input name="name" value="{{ device.name }}" aria-label="Device name">
+          <button class="link">Rename</button>
+        </form>
+      </td>
+      <td><code data-copy>{{ device.basic_user }}</code></td>
+      <td>{{ device.last_seen|default:"never" }}</td>
+      <td>{{ device.delivered }} book{{ device.delivered|pluralize }}</td>
+      <td class="actions">
+        <form method="post" action="{% url 'device_reset' device.pk %}"
+              onsubmit="return confirm('Generate a new password for {{ device.name|escapejs }}? The old one stops working immediately.');">
+          {% csrf_token %}<button class="link">Reset password</button>
+        </form>
+        <form method="post" action="{% url 'device_revoke' device.pk %}"
+              onsubmit="return confirm('Revoke {{ device.name|escapejs }}? It loses access to the catalog.');">
+          {% csrf_token %}<button class="link danger">Revoke</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No devices yet. Add one above, then follow <a href="{% url 'help' %}">Set up a reader</a>.</p>
+{% endif %}
+
+<p class="hint">Catalog URL: <code data-copy>{{ catalog_url }}</code></p>
+{% endblock %}

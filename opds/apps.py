@@ -2,4 +2,5 @@ from django.apps import AppConfig
 
 
 class OpdsConfig(AppConfig):
-    name = 'opds'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "opds"

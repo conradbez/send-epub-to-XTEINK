@@ -1,0 +1,33 @@
+{% load static %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Library{% endblock %}</title>
+  <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📚</text></svg>">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="{% url 'shelf' %}">📚 Library</a>
+  {% if user.is_authenticated %}
+    <nav>
+      <a href="{% url 'shelf' %}"{% if request.resolver_match.url_name == 'shelf' %} class="on"{% endif %}>Shelf</a>
+      <a href="{% url 'devices' %}"{% if request.resolver_match.url_name == 'devices' %} class="on"{% endif %}>Devices</a>
+      <a href="{% url 'help' %}"{% if request.resolver_match.url_name == 'help' %} class="on"{% endif %}>Set up a reader</a>
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Sign out</button></form>
+    </nav>
+  {% endif %}
+</header>
+
+<main>
+  {% if messages %}
+    <ul class="flashes">
+      {% for message in messages %}<li class="flash {{ message.tags }}">{{ message }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+<script src="{% static 'js/copy.js' %}" defer></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:dc="http://purl.org/dc/terms/"
+      xmlns:opds="http://opds-spec.org/2010/catalog">
+  <id>{{ self_url }}</id>
+  <title>{{ site_title }}</title>
+  <updated>{{ updated|date:"c" }}</updated>
+  <author><name>Library</name></author>
+  <link rel="self" href="{{ self_url }}"
+        type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+  <link rel="start" href="{{ start_url }}"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+{% if next_url %}  <link rel="next" href="{{ next_url }}"
+        type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+{% endif %}{% if previous_url %}  <link rel="previous" href="{{ previous_url }}"
+        type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+{% endif %}{% for book in books %}  <entry>
+    <id>urn:sha256:{{ book.sha256 }}</id>
+    <title>{{ book.title }}</title>
+    <updated>{{ book.added_at|date:"c" }}</updated>
+    <dc:issued>{{ book.added_at|date:"c" }}</dc:issued>
+{% if book.author %}    <author><name>{{ book.author }}</name></author>
+{% endif %}{% if book.series %}    <category label="{{ book.series }}" term="{{ book.series }}"/>
+{% endif %}    <content type="text">{{ book.byline }}</content>
+    <link rel="http://opds-spec.org/acquisition"
+          type="application/epub+zip"
+          length="{{ book.size }}"
+          href="{% url 'opds_acquire' book.pk %}"/>
+{% if book.has_cover %}    <link rel="http://opds-spec.org/image/thumbnail"
+          type="image/jpeg"
+          href="{% url 'opds_cover' book.pk %}"/>
+    <link rel="http://opds-spec.org/image"
+          type="image/jpeg"
+          href="{% url 'opds_cover' book.pk %}"/>
+{% endif %}  </entry>
+{% endfor %}</feed>

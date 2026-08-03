@@ -1,0 +1,87 @@
+{% extends "web/base.html" %}
+{% block title %}Set up a reader{% endblock %}
+
+{% block content %}
+<h1>Set up a reader</h1>
+<p class="lede">Everything below is filled in for your account. Nothing here is a placeholder — the URL is the real one for this server.</p>
+
+<div class="card step">
+  <h2>1. Your catalog URL</h2>
+  <p class="url"><code data-copy>{{ catalog_url }}</code></p>
+  {% if insecure_host %}
+  <p class="warn">This page was served over plain HTTP, so the URL above is not HTTPS. That is fine on a LAN box, but a Railway deployment must be <code>https://</code>.</p>
+  {% endif %}
+</div>
+
+<div class="card step">
+  <h2>2. Pick or create a device</h2>
+  {% if devices %}
+  <table class="devices">
+    <thead><tr><th>Device</th><th>Username</th><th>Last seen</th><th></th></tr></thead>
+    <tbody>
+      {% for device in devices %}
+      <tr>
+        <td>{{ device.name }}</td>
+        <td><code data-copy>{{ device.basic_user }}</code></td>
+        <td>{{ device.last_seen|default:"never" }}</td>
+        <td class="actions">
+          <form method="post" action="{% url 'device_reset' device.pk %}"
+                onsubmit="return confirm('Generate a new password for {{ device.name|escapejs }}? The old one stops working immediately.');">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button class="link">Reset password</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">Passwords are shown once, at creation. There is no way to display an existing one — reset it instead.</p>
+  {% else %}
+  <p>You have no devices yet.</p>
+  {% endif %}
+
+  <form method="post" action="{% url 'devices' %}" class="inline">
+    {% csrf_token %}
+    {{ form.name }}
+    <button type="submit">Add a device</button>
+  </form>
+</div>
+
+{% include "web/_credential.html" %}
+
+<div class="card step">
+  <h2>3. On the reader</h2>
+  <ol class="steps">
+    <li><strong>Settings → System → OPDS Servers → Add</strong></li>
+    <li>Paste the catalog URL: <code data-copy>{{ catalog_url }}</code></li>
+    <li>Enter the device <strong>username</strong> and <strong>password</strong> from step 2 (Basic auth)</li>
+    <li>Save, then go <strong>Home → OPDS → your library → Inbox</strong></li>
+    <li>Open a book from the Inbox to download it. Three taps, no cable.</li>
+  </ol>
+</div>
+
+<div class="card step">
+  <h2>4. Set the download folder (optional)</h2>
+  <p>Firmware 1.5.0 and newer lets you choose where OPDS downloads land and how they are named: <strong>Settings → System → OPDS Servers → Download folder</strong>. Leave it alone if you are unsure; the default works.</p>
+</div>
+
+<div class="card notes">
+  <h2>Notes</h2>
+  <ul>
+    <li><strong>Firmware v1.3.0 or newer is required.</strong> Older builds run out of memory during the TLS handshake and simply fail to connect over HTTPS.</li>
+    <li><strong>The Inbox is per device.</strong> A book leaves this reader's Inbox once <em>this</em> reader has downloaded it; your other readers still see it. To pull something down again, use <strong>All Books</strong>.</li>
+    <li><strong>A cancelled download stays in the Inbox.</strong> The delivery is recorded only when the last byte arrives.</li>
+    <li><strong>EPUB only.</strong> Anything else is rejected at upload — the check reads the file's contents, so renaming a PDF will not sneak it through.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h2>Storage</h2>
+  <p>{{ book_count }} book{{ book_count|pluralize }} on your shelf · {{ library_bytes|filesizeformat }} of your own · {{ blob_bytes|filesizeformat }} stored on the volume in total.</p>
+  <div class="meter{% if disk_used_pct >= 80 %} hot{% endif %}"><span style="width: {{ disk_used_pct }}%"></span></div>
+  <p class="hint">Volume {{ disk_used_pct }}% used — {{ disk_free|filesizeformat }} free of {{ disk_total|filesizeformat }}.
+  {% if disk_used_pct >= 80 %}<strong>Over 80%: grow the volume in Railway before it fills.</strong>{% endif %}</p>
+  <p class="hint">The volume is not snapshotted. Backups come from the nightly <code>manage.py backup</code>, not from the platform.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:opds="http://opds-spec.org/2010/catalog">
+  <id>{{ self_url }}</id>
+  <title>{{ site_title }}</title>
+  <updated>{{ updated|date:"c" }}</updated>
+  <author><name>{{ site_title }}</name></author>
+  <link rel="self" href="{{ self_url }}"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link rel="start" href="{{ start_url }}"
+        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+{% for section in sections %}  <entry>
+    <id>{{ start_url }}{{ section.title|slugify }}</id>
+    <title>{{ section.title }}</title>
+    <updated>{{ updated|date:"c" }}</updated>
+    <content type="text">{{ section.summary }}</content>
+    <link rel="subsection" href="{{ section.href }}"
+          type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+  </entry>
+{% endfor %}</feed>
