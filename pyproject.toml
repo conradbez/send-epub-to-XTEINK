@@ -1,0 +1,14 @@
+[project]
+name = "send-epub-to-xteink"
+version = "0.1.0"
+description = "Personal OPDS library: a one-way conveyor for EPUBs onto Crosspoint readers"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=6.0,<7",
+    "gunicorn>=23",
+    "whitenoise>=6.9",
+    "pillow>=11",
+]
+
+[tool.uv]
+package = false
