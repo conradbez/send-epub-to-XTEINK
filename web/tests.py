@@ -99,30 +99,29 @@ class ShelfTests(WebTestCase):
 
 
 class DeviceTests(WebTestCase):
-    def test_creating_a_device_shows_the_password_exactly_once(self):
+    def test_creating_a_device_shows_its_catalog_link(self):
         response = self.client.post("/devices/", {"name": "Lounge X4"}, follow=True)
         device = Device.objects.get()
-        password = response.context["new_credential"]["password"]
 
-        self.assertContains(response, device.basic_user)
-        self.assertContains(response, password)
-        self.assertTrue(device.check_device_password(password))
+        self.assertContains(response, f"http://testserver/k/{device.token}/")
 
-        again = self.client.get("/devices/")
-        self.assertNotContains(again, password)
-
-    def test_reset_issues_a_new_password_and_kills_the_old_one(self):
-        first = self.client.post("/devices/", {"name": "X3"}, follow=True)
+    def test_the_link_stays_visible_there_is_nothing_to_write_down(self):
+        self.client.post("/devices/", {"name": "Lounge X4"}, follow=True)
         device = Device.objects.get()
-        old = first.context["new_credential"]["password"]
+        for url in ("/devices/", "/help/"):
+            self.assertContains(self.client.get(url), device.token)
 
-        second = self.client.post(f"/devices/{device.pk}/reset/", follow=True)
-        new = second.context["new_credential"]["password"]
+    def test_reset_issues_a_new_link_and_kills_the_old_one(self):
+        self.client.post("/devices/", {"name": "X3"}, follow=True)
+        device = Device.objects.get()
+        old = device.token
+
+        response = self.client.post(f"/devices/{device.pk}/reset/", follow=True)
 
         device.refresh_from_db()
-        self.assertNotEqual(old, new)
-        self.assertFalse(device.check_device_password(old))
-        self.assertTrue(device.check_device_password(new))
+        self.assertNotEqual(old, device.token)
+        self.assertNotContains(response, old)
+        self.assertContains(response, device.token)
 
     def test_rename_and_revoke(self):
         self.client.post("/devices/", {"name": "Old name"}, follow=True)
@@ -137,24 +136,41 @@ class DeviceTests(WebTestCase):
 
     def test_cannot_touch_another_users_device(self):
         stranger = User.objects.create_user("stranger", password="x")
-        device, _ = Device.create_with_credentials(stranger, "Not yours")
+        device = Device.objects.create(user=stranger, name="Not yours")
         for url in (f"/devices/{device.pk}/reset/", f"/devices/{device.pk}/revoke/"):
             self.assertEqual(self.client.post(url).status_code, 404)
 
+    def test_another_users_link_is_never_shown(self):
+        stranger = User.objects.create_user("stranger", password="x")
+        device = Device.objects.create(user=stranger, name="Not yours")
+        for url in ("/devices/", "/help/"):
+            self.assertNotContains(self.client.get(url), device.token)
+
 
 class HelpPageTests(WebTestCase):
-    def test_shows_the_real_catalog_url_not_a_placeholder(self):
+    def test_shows_a_real_pastable_link_per_reader_not_a_placeholder(self):
+        device = Device.objects.create(user=self.user, name="Lounge X4")
         response = self.client.get("/help/")
-        self.assertContains(response, "http://testserver/opds/")
+
+        self.assertContains(response, "Lounge X4")
+        self.assertContains(response, f"http://testserver/k/{device.token}/")
         self.assertNotContains(response, "example.com")
 
-    def test_lists_devices_with_usernames_but_never_a_password(self):
-        device, password = Device.create_with_credentials(self.user, "Lounge X4")
+    def test_the_copy_button_carries_the_url(self):
+        device = Device.objects.create(user=self.user, name="Lounge X4")
         response = self.client.get("/help/")
-        self.assertContains(response, "Lounge X4")
-        self.assertContains(response, device.basic_user)
-        self.assertNotContains(response, password)
-        self.assertContains(response, "Reset password")
+        self.assertContains(
+            response, f'data-copy="http://testserver/k/{device.token}/">Copy'
+        )
+
+    def test_leads_with_the_paste_route_and_keeps_typing_as_the_fallback(self):
+        content = self.client.get("/help/").content.decode()
+        self.assertLess(
+            content.index("Paste it in from your phone"),
+            content.index("If you have no phone to hand"),
+        )
+        self.assertIn("File Transfer", content)   # how the reader's web UI opens
+        self.assertIn("OPDS Servers", content)    # the card you paste into
 
     def test_covers_the_questions_people_would_otherwise_ask(self):
         response = self.client.get("/help/")
@@ -162,7 +178,7 @@ class HelpPageTests(WebTestCase):
         self.assertIn("v1.3.0", content)          # TLS handshake OOM
         self.assertIn("All Books", content)       # re-download after Inbox
         self.assertIn("EPUB only", content)       # nothing else is accepted
-        self.assertIn("Settings", content)        # on-device steps
+        self.assertIn("Settings", content)        # typing it in by hand
 
     def test_reports_storage_use(self):
         self.add_book("Weighty")
