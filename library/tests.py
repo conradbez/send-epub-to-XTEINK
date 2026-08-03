@@ -3,7 +3,8 @@ import zipfile
 
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.core.management import call_command
+from django.test import TestCase, TransactionTestCase, override_settings
 
 from . import epub, storage
 from .ingest import ingest
