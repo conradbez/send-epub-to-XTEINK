@@ -3,73 +3,77 @@
 
 {% block content %}
 <h1>Set up a reader</h1>
-<p class="lede">Everything below is filled in for your account. Nothing here is a placeholder — the URL is the real one for this server.</p>
+<p class="lede">Two tabs on your phone, one paste, no on-device keyboard at all. Nothing below is a placeholder — these are the real links for your account.</p>
 
 <div class="card step">
-  <h2>1. Your catalog URL</h2>
-  <p class="url"><code data-copy>{{ catalog_url }}</code></p>
-  {% if insecure_host %}
-  <p class="warn">This page was served over plain HTTP, so the URL above is not HTTPS. That is fine on a LAN box, but a Railway deployment must be <code>https://</code>.</p>
-  {% endif %}
-</div>
-
-<div class="card step">
-  <h2>2. Pick or create a device</h2>
+  <h2>1. Copy the link for this reader</h2>
   {% if devices %}
-  <table class="devices">
-    <thead><tr><th>Device</th><th>Username</th><th>Last seen</th><th></th></tr></thead>
-    <tbody>
-      {% for device in devices %}
-      <tr>
-        <td>{{ device.name }}</td>
-        <td><code data-copy>{{ device.basic_user }}</code></td>
-        <td>{{ device.last_seen|default:"never" }}</td>
-        <td class="actions">
-          <form method="post" action="{% url 'device_reset' device.pk %}"
-                onsubmit="return confirm('Generate a new password for {{ device.name|escapejs }}? The old one stops working immediately.');">
-            {% csrf_token %}
-            <input type="hidden" name="next" value="{{ request.path }}">
-            <button class="link">Reset password</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <p class="hint">Passwords are shown once, at creation. There is no way to display an existing one — reset it instead.</p>
+  <p class="hint">One link per reader. It is the whole credential — no username, no password — and it is what keeps the Inbox separate per device.</p>
+  {% for device in devices %}
+  <div class="linkrow">
+    <div class="linkrow-text">
+      <span class="who">{{ device.name }}
+        <form method="post" action="{% url 'device_reset' device.pk %}"
+              onsubmit="return confirm('Issue a new link for {{ device.name|escapejs }}? The old one stops working immediately.');">
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ request.path }}">
+          <button class="link">New link</button>
+        </form>
+      </span>
+      <code class="url" data-copy>{{ device.catalog_url }}</code>
+    </div>
+    <button type="button" class="copy" data-copy="{{ device.catalog_url }}">Copy</button>
+  </div>
+  {% endfor %}
   {% else %}
-  <p>You have no devices yet.</p>
+  <p class="empty">No readers yet. Name one and its link appears here.</p>
   {% endif %}
 
   <form method="post" action="{% url 'devices' %}" class="inline">
     {% csrf_token %}
     {{ form.name }}
-    <button type="submit">Add a device</button>
+    <button type="submit"{% if devices %} class="secondary"{% endif %}>Add a reader</button>
   </form>
+
+  {% if insecure_host %}
+  <p class="warn">This page was served over plain HTTP, so the link above is not HTTPS — and the link is the credential. That is fine on a LAN box; a Railway deployment must be <code>https://</code>.</p>
+  {% endif %}
 </div>
 
-{% include "web/_credential.html" %}
-
 <div class="card step">
-  <h2>3. On the reader</h2>
+  <h2>2. Paste it in from your phone</h2>
   <ol class="steps">
-    <li><strong>Settings → System → OPDS Servers → Add</strong></li>
-    <li>Paste the catalog URL: <code data-copy>{{ catalog_url }}</code></li>
-    <li>Enter the device <strong>username</strong> and <strong>password</strong> from step 2 (Basic auth)</li>
-    <li>Save, then go <strong>Home → OPDS → your library → Inbox</strong></li>
-    <li>Open a book from the Inbox to download it. Three taps, no cable.</li>
+    <li>On the reader: <strong>Home → File Transfer → Join Network</strong>. It is already on your wifi.</li>
+    <li>The reader shows its own address — <code>http://crosspoint.local/</code> where that works, an IP address otherwise — and a QR code for it.</li>
+    <li>On your phone: scan the QR, or type that short address once.</li>
+    <li>Come back to this tab and tap <strong>Copy</strong> above.</li>
+    <li>In the reader's web page: the <strong>OPDS Servers</strong> card → <strong>Add</strong> → paste → <strong>Save</strong>.</li>
+    <li>Exit File Transfer mode on the reader. Its little web server stops when you leave that screen.</li>
   </ol>
+  <p class="hint">Two tabs in one phone browser, one paste. The reader's keyboard never comes out.</p>
 </div>
 
 <div class="card step">
-  <h2>4. Set the download folder (optional)</h2>
-  <p>Firmware 1.5.0 and newer lets you choose where OPDS downloads land and how they are named: <strong>Settings → System → OPDS Servers → Download folder</strong>. Leave it alone if you are unsure; the default works.</p>
+  <h2>3. Open the catalog</h2>
+  <ol class="steps">
+    <li>On the reader: <strong>Home → OPDS → your library</strong>.</li>
+    <li>It opens straight on the <strong>Inbox</strong> — exactly the books this reader has not taken yet. No menu to walk.</li>
+    <li>Open a book to download it. It leaves this reader's Inbox once the last byte lands.</li>
+  </ol>
+  <p class="hint"><strong>All Books</strong> and <strong>Recent</strong> sit at the bottom of the Inbox, after the books, for when you want something back that this reader already had.</p>
+</div>
+
+<div class="card step">
+  <h2>4. If you have no phone to hand</h2>
+  <p>You can still type it: <strong>Settings → System → OPDS Servers → Add</strong>, then enter the URL from step 1. It is one field — leave username and password empty. The token uses no ambiguous characters, so there is no <em>l</em>-versus-<em>1</em> to squint at.</p>
+  <p class="hint">Firmware 1.5.0 and newer also lets you choose where downloads land and how they are named, under the same screen. The default is fine.</p>
 </div>
 
 <div class="card notes">
   <h2>Notes</h2>
   <ul>
     <li><strong>Firmware v1.3.0 or newer is required.</strong> Older builds run out of memory during the TLS handshake and simply fail to connect over HTTPS.</li>
+    <li><strong>The link is the credential.</strong> Anyone holding it reads your shelf. It travels in the URL, so it does end up in server logs — that is the price of a setup with nothing to type. Lost a reader? Give it a new link on <a href="{% url 'devices' %}">Devices</a>; the old one dies at once.</li>
     <li><strong>The Inbox is per device.</strong> A book leaves this reader's Inbox once <em>this</em> reader has downloaded it; your other readers still see it. To pull something down again, use <strong>All Books</strong>.</li>
     <li><strong>A cancelled download stays in the Inbox.</strong> The delivery is recorded only when the last byte arrives.</li>
     <li><strong>EPUB only.</strong> Anything else is rejected at upload — the check reads the file's contents, so renaming a PDF will not sneak it through.</li>

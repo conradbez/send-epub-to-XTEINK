@@ -1,38 +1,43 @@
 import secrets
 
-from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.db.models import UniqueConstraint
+from django.urls import reverse
 
 from . import storage
+
+# 31 unambiguous characters, 16 of them: ~79 bits. The paste route means this is
+# rarely typed, but when it is, it is typed on a five-way keyboard.
+TOKEN_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
+TOKEN_LENGTH = 16
 
 
 class User(AbstractUser):
     pass
 
 
-def _make_basic_user(name: str) -> str:
-    """A short, typeable username for a device. Unique across all devices."""
-    stem = "".join(c for c in name.lower() if c.isalnum())[:12] or "device"
+def make_device_token() -> str:
+    """The whole credential: no username, no password field, one string."""
     for _ in range(20):
-        candidate = f"{stem}-{secrets.token_hex(2)}"
-        if not Device.objects.filter(basic_user=candidate).exists():
+        candidate = "".join(secrets.choice(TOKEN_ALPHABET) for _ in range(TOKEN_LENGTH))
+        if not Device.objects.filter(token=candidate).exists():
             return candidate
-    return f"{stem}-{secrets.token_hex(6)}"
-
-
-def make_device_password() -> str:
-    """Typed once, on a device with no keyboard. Unambiguous characters only."""
-    alphabet = "abcdefghjkmnpqrstuvwxyz23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(12))
+    raise RuntimeError("Could not mint a unique device token")
 
 
 class Device(models.Model):
+    """A reader, authenticated by a capability URL rather than a password.
+
+    The token is the credential and it is stored in the clear: /help/ shows each
+    reader's link whenever you ask, so a lost link is re-read rather than reset.
+    It travels in the path, so it lands in access logs — the trade for a setup
+    that never touches the on-device keyboard. Rotate from /devices/.
+    """
+
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="devices")
     name = models.CharField(max_length=100)
-    basic_user = models.CharField(max_length=64, unique=True)
-    pw_hash = models.CharField(max_length=256)
+    token = models.CharField(max_length=64, unique=True, default=make_device_token)
     last_seen = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -40,28 +45,17 @@ class Device(models.Model):
         ordering = ["name"]
 
     def __str__(self):
-        return f"{self.name} ({self.basic_user})"
+        return self.name
 
-    def set_password(self, raw: str) -> None:
-        self.pw_hash = make_password(raw)
+    @property
+    def catalog_path(self) -> str:
+        return reverse("opds_root", args=[self.token])
 
-    def check_device_password(self, raw: str) -> bool:
-        return check_password(raw, self.pw_hash)
-
-    @classmethod
-    def create_with_credentials(cls, user, name: str) -> tuple["Device", str]:
-        """Returns the device and its plaintext password, shown once."""
-        raw = make_device_password()
-        device = cls(user=user, name=name, basic_user=_make_basic_user(name))
-        device.set_password(raw)
-        device.save()
-        return device, raw
-
-    def reset_password(self) -> str:
-        raw = make_device_password()
-        self.set_password(raw)
-        self.save(update_fields=["pw_hash"])
-        return raw
+    def rotate_token(self) -> str:
+        """Old link dies immediately; the reader needs the new one pasted in."""
+        self.token = make_device_token()
+        self.save(update_fields=["token"])
+        return self.token
 
 
 class Book(models.Model):

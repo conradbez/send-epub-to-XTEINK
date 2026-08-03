@@ -1,0 +1,26 @@
+{% extends "web/base.html" %}
+{% block title %}Create account{% endblock %}
+
+{% block content %}
+<div class="card narrow">
+  <h1>Create account</h1>
+  {% for error in form.non_field_errors %}<p class="flash error">{{ error }}</p>{% endfor %}
+  <form method="post">
+    {% csrf_token %}
+    <label for="{{ form.username.id_for_label }}">Username</label>
+    {{ form.username }}
+    {% for error in form.username.errors %}<p class="flash error">{{ error }}</p>{% endfor %}
+
+    <label for="{{ form.password1.id_for_label }}">Password</label>
+    {{ form.password1 }}
+    {% for error in form.password1.errors %}<p class="flash error">{{ error }}</p>{% endfor %}
+
+    <label for="{{ form.password2.id_for_label }}">Confirm password</label>
+    {{ form.password2 }}
+    {% for error in form.password2.errors %}<p class="flash error">{{ error }}</p>{% endfor %}
+
+    <button type="submit">Create account</button>
+  </form>
+  <p class="hint">Already have one? <a href="{% url 'login' %}">Sign in</a>.</p>
+</div>
+{% endblock %}

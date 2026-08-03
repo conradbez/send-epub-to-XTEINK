@@ -9,7 +9,7 @@
   <link rel="self" href="{{ self_url }}"
         type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
   <link rel="start" href="{{ start_url }}"
-        type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+        type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
 {% if next_url %}  <link rel="next" href="{{ next_url }}"
         type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
 {% endif %}{% if previous_url %}  <link rel="previous" href="{{ previous_url }}"
@@ -25,12 +25,20 @@
     <link rel="http://opds-spec.org/acquisition"
           type="application/epub+zip"
           length="{{ book.size }}"
-          href="{% url 'opds_acquire' book.pk %}"/>
+          href="{% url 'opds_acquire' token book.pk %}"/>
 {% if book.has_cover %}    <link rel="http://opds-spec.org/image/thumbnail"
           type="image/jpeg"
-          href="{% url 'opds_cover' book.pk %}"/>
+          href="{% url 'opds_cover' token book.pk %}"/>
     <link rel="http://opds-spec.org/image"
           type="image/jpeg"
-          href="{% url 'opds_cover' book.pk %}"/>
+          href="{% url 'opds_cover' token book.pk %}"/>
 {% endif %}  </entry>
+{% endfor %}{% for section in sections %}  <entry>
+    <id>{{ start_url }}{{ section.title|slugify }}</id>
+    <title>{{ section.title }}</title>
+    <updated>{{ updated|date:"c" }}</updated>
+    <content type="text">{{ section.summary }}</content>
+    <link rel="subsection" href="{{ section.href }}"
+          type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+  </entry>
 {% endfor %}</feed>

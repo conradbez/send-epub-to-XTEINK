@@ -4,6 +4,9 @@ Serving rules that matter on e-ink firmware: every response carries an explicit
 Content-Length and ETag, feeds are capped at 50 entries, and a Delivery row is
 written only once the last byte has actually left — a cancelled download stays
 in the Inbox.
+
+Every URL carries the device's token, so a feed can only ever link to feeds for
+the same device. There is no shared entry point to get lost in.
 """
 
 import logging
@@ -18,60 +21,37 @@ from django.utils import timezone
 
 from library.models import Book, Delivery
 
-from .auth import basic_auth
+from .auth import device_token
 
 logger = logging.getLogger(__name__)
 
-NAVIGATION_TYPE = "application/atom+xml;profile=opds-catalog;kind=navigation"
 ACQUISITION_TYPE = "application/atom+xml;profile=opds-catalog;kind=acquisition"
 
 
-def _feed_response(request, template, context, kind=ACQUISITION_TYPE):
+def _url(request, name, *args) -> str:
+    return reverse(name, args=[request.device.token, *args])
+
+
+def _feed_response(request, context):
     from django.template.loader import render_to_string
 
-    body = render_to_string(template, context, request=request).encode("utf-8")
-    response = HttpResponse(body, content_type=kind)
+    body = render_to_string("opds/acquisition.xml", context, request=request)
+    body = body.encode("utf-8")
+    response = HttpResponse(body, content_type=ACQUISITION_TYPE)
     response["Content-Length"] = str(len(body))
     return response
 
 
-def _base_context(request, title, path):
-    return {
+def _acquisition_feed(request, title, queryset, path, paginate=True, sections=()):
+    context = {
         "site_title": title,
         "self_url": request.build_absolute_uri(path),
-        "start_url": request.build_absolute_uri(reverse("opds_root")),
+        "start_url": request.build_absolute_uri(_url(request, "opds_root")),
         "updated": timezone.now(),
         "device": request.device,
+        "token": request.device.token,
+        "sections": sections,
     }
-
-
-@basic_auth
-def root(request):
-    owned = Book.objects.filter(owner=request.user)
-    inbox_count = owned.exclude(deliveries__device=request.device).count()
-    context = _base_context(request, "Library", reverse("opds_root"))
-    context["sections"] = [
-        {
-            "title": "Inbox",
-            "href": reverse("opds_inbox"),
-            "summary": f"{inbox_count} book(s) not yet on {request.device.name}",
-        },
-        {
-            "title": "All Books",
-            "href": reverse("opds_all"),
-            "summary": f"Everything on your shelf ({owned.count()})",
-        },
-        {
-            "title": "Recent",
-            "href": reverse("opds_recent"),
-            "summary": "The last 50 you added",
-        },
-    ]
-    return _feed_response(request, "opds/navigation.xml", context, NAVIGATION_TYPE)
-
-
-def _acquisition_feed(request, title, queryset, path, paginate=True):
-    context = _base_context(request, title, path)
     if paginate:
         paginator = Paginator(queryset, settings.OPDS_PAGE_SIZE)
         page = paginator.get_page(request.GET.get("page") or 1)
@@ -81,35 +61,54 @@ def _acquisition_feed(request, title, queryset, path, paginate=True):
             context["next_url"] = f"{base}?page={page.next_page_number()}"
         if page.has_previous():
             context["previous_url"] = f"{base}?page={page.previous_page_number()}"
+        # Sub-feeds belong after the books, and only where the list ends —
+        # repeating them on every page just pushes books further down.
+        if page.has_next():
+            context["sections"] = ()
     else:
         context["books"] = queryset
-    return _feed_response(request, "opds/acquisition.xml", context)
+    return _feed_response(request, context)
 
 
-@basic_auth
+@device_token
 def inbox(request):
-    """Books this user owns that *this* device has not downloaded."""
-    queryset = (
-        Book.objects.filter(owner=request.user)
-        .exclude(deliveries__device=request.device)
-        .order_by("-added_at")
-    )
+    """The root feed: books this user owns that *this* device has not taken.
+
+    All Books and Recent hang off the end of it as sub-feeds, so the catalog
+    opens on the new books and navigation is something you opt into.
+    """
+    owned = Book.objects.filter(owner=request.user)
+    queryset = owned.exclude(deliveries__device=request.device).order_by("-added_at")
+    sections = [
+        {
+            "title": "All Books",
+            "href": _url(request, "opds_all"),
+            "summary": f"Everything on your shelf ({owned.count()})",
+        },
+        {
+            "title": "Recent",
+            "href": _url(request, "opds_recent"),
+            "summary": "The last 50 you added, delivered or not",
+        },
+    ]
     return _acquisition_feed(
-        request, "Inbox", queryset, reverse("opds_inbox")
+        request, "Inbox", queryset, _url(request, "opds_root"), sections=sections
     )
 
 
-@basic_auth
+@device_token
 def all_books(request):
     queryset = Book.objects.filter(owner=request.user).order_by("title")
-    return _acquisition_feed(request, "All Books", queryset, reverse("opds_all"))
+    return _acquisition_feed(
+        request, "All Books", queryset, _url(request, "opds_all")
+    )
 
 
-@basic_auth
+@device_token
 def recent(request):
     queryset = Book.objects.filter(owner=request.user).order_by("-added_at")[:50]
     return _acquisition_feed(
-        request, "Recent", queryset, reverse("opds_recent"), paginate=False
+        request, "Recent", queryset, _url(request, "opds_recent"), paginate=False
     )
 
 
@@ -132,7 +131,7 @@ def _tracked(chunks, expected: int, book_id: int, device_id: int):
         _record_delivery(book_id, device_id)
 
 
-@basic_auth
+@device_token
 def acquire(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
     path = book.file_path
@@ -165,7 +164,7 @@ def acquire(request, pk):
     return response
 
 
-@basic_auth
+@device_token
 def cover(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
     path = book.cover_path

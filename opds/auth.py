@@ -1,51 +1,24 @@
-"""HTTP Basic auth against Device credentials.
+"""Capability-URL auth: the token in the path *is* the credential.
 
-Device credentials are deliberately not the login password: a reader that is
-lost or handed on gets revoked on its own, without disturbing the web login.
+Typing a URL plus a username plus a password on a five-way keyboard was the
+worst step in the whole flow. One string replaces all three. Still per device,
+still revocable on its own without disturbing the web login — a reader that is
+lost or handed on gets its link rotated and nothing else changes.
 """
 
-import base64
-import binascii
 import datetime
 from functools import wraps
 
-from django.http import HttpResponse
+from django.http import Http404
 from django.utils import timezone
 
 from library.models import Device
 
-REALM = "Library"
 LAST_SEEN_INTERVAL = datetime.timedelta(minutes=5)
 
 
-def _challenge() -> HttpResponse:
-    response = HttpResponse("Authentication required.", status=401)
-    response["WWW-Authenticate"] = f'Basic realm="{REALM}", charset="UTF-8"'
-    return response
-
-
-def _credentials(request) -> tuple[str, str] | None:
-    header = request.META.get("HTTP_AUTHORIZATION", "")
-    scheme, _, payload = header.partition(" ")
-    if scheme.lower() != "basic" or not payload:
-        return None
-    try:
-        decoded = base64.b64decode(payload.strip(), validate=True).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError, ValueError):
-        return None
-    username, sep, password = decoded.partition(":")
-    return (username, password) if sep else None
-
-
-def resolve_device(request) -> Device | None:
-    credentials = _credentials(request)
-    if not credentials:
-        return None
-    username, password = credentials
-    device = Device.objects.select_related("user").filter(basic_user=username).first()
-    if device is None or not device.check_device_password(password):
-        return None
-    return device
+def resolve_device(token: str) -> Device | None:
+    return Device.objects.select_related("user").filter(token=token).first()
 
 
 def _touch(device: Device) -> None:
@@ -55,14 +28,18 @@ def _touch(device: Device) -> None:
         device.last_seen = now
 
 
-def basic_auth(view):
-    """Attaches request.device and request.user, or challenges."""
+def device_token(view):
+    """Swaps the URL's token for request.device and request.user, or 404s.
+
+    A 404 and not a 401: there is no realm to challenge for, and a wrong token
+    should look exactly like a URL that was never a catalog.
+    """
 
     @wraps(view)
-    def wrapper(request, *args, **kwargs):
-        device = resolve_device(request)
+    def wrapper(request, token, *args, **kwargs):
+        device = resolve_device(token)
         if device is None:
-            return _challenge()
+            raise Http404
         request.device = device
         request.user = device.user
         _touch(device)

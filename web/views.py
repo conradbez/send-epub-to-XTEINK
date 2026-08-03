@@ -2,6 +2,7 @@ import shutil
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q, Sum
 from django.http import FileResponse, Http404
@@ -12,7 +13,25 @@ from library import storage
 from library.ingest import ingest
 from library.models import Book, Device
 
-from .forms import DeviceForm
+from .forms import DeviceForm, SignupForm
+
+
+def signup(request):
+    """Open registration: each account gets its own shelf and devices."""
+    if request.user.is_authenticated:
+        return redirect("shelf")
+
+    if request.method == "POST":
+        form = SignupForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            login(request, user)
+            messages.success(request, "Welcome. Upload your first book below.")
+            return redirect("shelf")
+    else:
+        form = SignupForm()
+
+    return render(request, "web/signup.html", {"form": form})
 
 
 @login_required
@@ -89,15 +108,12 @@ def devices(request):
     if request.method == "POST":
         form = DeviceForm(request.POST)
         if form.is_valid():
-            device, password = Device.create_with_credentials(
-                request.user, form.cleaned_data["name"]
+            device = Device.objects.create(
+                user=request.user, name=form.cleaned_data["name"]
             )
-            request.session["new_credential"] = {
-                "device_id": device.pk,
-                "name": device.name,
-                "basic_user": device.basic_user,
-                "password": password,
-            }
+            messages.success(
+                request, f"Added {device.name}. Its catalog link is below."
+            )
             return redirect("devices")
     else:
         form = DeviceForm()
@@ -105,12 +121,7 @@ def devices(request):
     return render(
         request,
         "web/devices.html",
-        {
-            "form": form,
-            "devices": _devices_for(request.user),
-            "new_credential": request.session.pop("new_credential", None),
-            "catalog_url": request.build_absolute_uri("/opds/"),
-        },
+        {"form": form, "devices": _devices_for(request)},
     )
 
 
@@ -118,12 +129,12 @@ def devices(request):
 @require_POST
 def device_reset(request, pk):
     device = get_object_or_404(Device, pk=pk, user=request.user)
-    request.session["new_credential"] = {
-        "device_id": device.pk,
-        "name": device.name,
-        "basic_user": device.basic_user,
-        "password": device.reset_password(),
-    }
+    device.rotate_token()
+    messages.success(
+        request,
+        f"New link for {device.name}. The old one stopped working — paste the "
+        "new one into that reader.",
+    )
     return redirect(request.POST.get("next") or "devices")
 
 
@@ -153,16 +164,15 @@ def device_revoke(request, pk):
 def help_page(request):
     usage = shutil.disk_usage(settings.DATA_DIR)
     library_bytes = (
-        Book.objects.aggregate(total=Sum("size"))["total"] or 0
+        Book.objects.filter(owner=request.user).aggregate(total=Sum("size"))["total"]
+        or 0
     )
     return render(
         request,
         "web/help.html",
         {
-            "catalog_url": request.build_absolute_uri("/opds/"),
-            "devices": _devices_for(request.user),
+            "devices": _devices_for(request),
             "form": DeviceForm(),
-            "new_credential": request.session.pop("new_credential", None),
             "book_count": Book.objects.filter(owner=request.user).count(),
             "library_bytes": library_bytes,
             "blob_bytes": storage.dir_size(settings.BOOKS_DIR),
@@ -174,9 +184,13 @@ def help_page(request):
     )
 
 
-def _devices_for(user):
-    return (
-        Device.objects.filter(user=user)
+def _devices_for(request):
+    """Devices, each carrying the absolute catalog URL to paste into it."""
+    devices = list(
+        Device.objects.filter(user=request.user)
         .annotate(delivered=Count("deliveries"))
         .order_by("name")
     )
+    for device in devices:
+        device.catalog_url = request.build_absolute_uri(device.catalog_path)
+    return devices
