@@ -109,7 +109,8 @@ code[data-copy]::after { content: " ⧉"; color: var(--muted); }
 }
 
 /* --- upload --- */
-.upload { display: flex; gap: .75rem; align-items: stretch; flex-wrap: wrap; margin-top: 1rem; }
+.upload { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-top: 1rem; }
+.upload button { padding: .6rem 1.4rem; }
 .dropzone {
   flex: 1 1 20rem; margin: 0; padding: 1rem; cursor: pointer;
   border: 2px dashed var(--line); border-radius: var(--radius);
