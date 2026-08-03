@@ -14,10 +14,10 @@ class LibraryUserAdmin(UserAdmin):
 
 @admin.register(Device)
 class DeviceAdmin(admin.ModelAdmin):
-    list_display = ("name", "basic_user", "user", "last_seen", "created_at")
+    list_display = ("name", "user", "last_seen", "created_at")
     list_filter = ("user",)
-    search_fields = ("name", "basic_user")
-    readonly_fields = ("pw_hash", "last_seen", "created_at")
+    search_fields = ("name", "token")
+    readonly_fields = ("token", "last_seen", "created_at")
 
 
 @admin.register(Book)

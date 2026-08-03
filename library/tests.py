@@ -152,21 +152,29 @@ class StorageTests(TestCase):
 
 
 class DeviceTests(TestCase):
-    def test_credentials_are_hashed_and_resettable(self):
+    def test_a_device_gets_a_unique_unambiguous_token(self):
         user = User.objects.create_user("reader", password="x")
-        device, password = Device.create_with_credentials(user, "Lounge X4")
-        self.assertNotIn(password, device.pw_hash)
-        self.assertTrue(device.check_device_password(password))
+        tokens = {Device.objects.create(user=user, name="X4").token for _ in range(5)}
+        self.assertEqual(len(tokens), 5)
+        for token in tokens:
+            self.assertEqual(len(token), 16)
+            # No l/1/0/O to squint at on a five-way keyboard.
+            self.assertFalse(set(token) & set("ilo01"))
 
-        replacement = device.reset_password()
-        self.assertNotEqual(password, replacement)
-        self.assertFalse(device.check_device_password(password))
-        self.assertTrue(device.check_device_password(replacement))
-
-    def test_basic_usernames_are_unique(self):
+    def test_the_catalog_path_carries_the_token(self):
         user = User.objects.create_user("reader", password="x")
-        names = {Device.create_with_credentials(user, "X4")[0].basic_user for _ in range(5)}
-        self.assertEqual(len(names), 5)
+        device = Device.objects.create(user=user, name="Lounge X4")
+        self.assertEqual(device.catalog_path, f"/k/{device.token}/")
+
+    def test_rotating_kills_the_old_link(self):
+        user = User.objects.create_user("reader", password="x")
+        device = Device.objects.create(user=user, name="Lounge X4")
+        old = device.token
+        new = device.rotate_token()
+
+        self.assertNotEqual(old, new)
+        device.refresh_from_db()
+        self.assertEqual(device.token, new)
 
 
 class SweepTmpTests(TempStorage, TestCase):
