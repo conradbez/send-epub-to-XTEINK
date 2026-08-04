@@ -8,7 +8,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 
 from . import epub, storage
 from .ingest import ingest
-from .models import Book, User
+from .models import Blob, Book, User
 from .testutils import TempStorage, make_epub, upload_file
 
 
@@ -27,15 +27,21 @@ class IngestTests(TempStorage, TestCase):
         self.assertEqual(book.author, "Frank Herbert")
         self.assertEqual(book.series, "Dune")
         self.assertEqual(book.seq, 1.0)
-        self.assertTrue(book.file_path.exists())
-        self.assertEqual(book.size, book.file_path.stat().st_size)
+        self.assertEqual(storage.size(book.sha256), book.size)
+
+    def test_the_stored_bytes_are_the_uploaded_bytes(self):
+        payload = make_epub(title="Byte for byte", padding=200_000)
+        book = ingest(self.user, SimpleUploadedFile("b.epub", payload)).book
+        self.assertEqual(b"".join(storage.stream(book.sha256)), payload)
+        # Round-tripped through more than one chunk, or this proves little.
+        self.assertGreater(len(payload), storage.CHUNK)
 
     def test_cover_is_grayscale_jpeg_within_the_size_cap(self):
         from PIL import Image
 
         book = ingest(self.user, upload_file()).book
         self.assertTrue(book.has_cover)
-        with Image.open(book.cover_path) as image:
+        with Image.open(io.BytesIO(storage.read_cover(book.sha256))) as image:
             self.assertEqual(image.format, "JPEG")
             self.assertEqual(image.mode, "L")
             self.assertLessEqual(max(image.size), settings.COVER_LONG_EDGE)
@@ -80,9 +86,7 @@ class IngestTests(TempStorage, TestCase):
         theirs = ingest(other, SimpleUploadedFile("a.epub", payload)).book
         self.assertEqual(mine.sha256, theirs.sha256)
         self.assertEqual(Book.objects.count(), 2)
-        self.assertEqual(
-            len(list(settings.BOOKS_DIR.glob(f"{mine.sha256[:2]}/{mine.sha256}*"))), 1
-        )
+        self.assertEqual(Blob.objects.count(), 1)
 
     @override_settings(MAX_UPLOAD_BYTES=2048)
     def test_oversize_upload_is_rejected_and_leaves_no_temp_file(self):
@@ -105,14 +109,14 @@ class IngestTests(TempStorage, TestCase):
         payload = make_epub(title="Shared")
         mine = ingest(self.user, SimpleUploadedFile("a.epub", payload)).book
         theirs = ingest(other, SimpleUploadedFile("a.epub", payload)).book
-        path, cover = mine.file_path, mine.cover_path
+        sha256 = mine.sha256
 
         mine.delete_with_blobs()
-        self.assertTrue(path.exists(), "another owner still holds these bytes")
+        self.assertTrue(storage.exists(sha256), "another owner still holds these bytes")
 
         theirs.delete_with_blobs()
-        self.assertFalse(path.exists())
-        self.assertFalse(cover.exists())
+        self.assertFalse(storage.exists(sha256))
+        self.assertIsNone(storage.read_cover(sha256))
 
 
 class EpubParsingTests(TempStorage, TestCase):
@@ -195,27 +199,29 @@ class SweepTmpTests(TempStorage, TestCase):
 
 
 class BackupTests(TempStorage, TransactionTestCase):
-    def test_backup_writes_a_usable_snapshot_and_a_blob_tar(self):
+    def test_the_snapshot_carries_the_books_themselves(self):
         import sqlite3
-        import tarfile
 
         user = User.objects.create_user("reader", password="x")
-        ingest(user, upload_file(title="Backed up"))
+        payload = make_epub(title="Backed up")
+        book = ingest(user, SimpleUploadedFile("b.epub", payload)).book
 
         with self.settings(BACKUP_DIR=settings.DATA_DIR / "backup"):
             call_command("backup", stdout=io.StringIO())
             snapshots = sorted((settings.DATA_DIR / "backup").glob("library-*.db"))
-            tars = sorted((settings.DATA_DIR / "backup").glob("books-*.tar"))
-
             self.assertEqual(len(snapshots), 1)
-            connection = sqlite3.connect(snapshots[0])
-            count = connection.execute("SELECT count(*) FROM library_book").fetchone()
-            connection.close()
-            self.assertEqual(count[0], 1)
 
-            self.assertEqual(len(tars), 1)
-            with tarfile.open(tars[0]) as tar:
-                self.assertTrue(any(n.startswith("books/") for n in tar.getnames()))
+            connection = sqlite3.connect(snapshots[0])
+            try:
+                books = connection.execute("SELECT count(*) FROM library_book")
+                self.assertEqual(books.fetchone()[0], 1)
+                stored = connection.execute(
+                    "SELECT data FROM library_blob WHERE sha256 = ?", [book.sha256]
+                ).fetchone()
+            finally:
+                connection.close()
+            # A restore from this one file is the whole library, bytes included.
+            self.assertEqual(bytes(stored[0]), payload)
 
 
 def _container(opf_path):

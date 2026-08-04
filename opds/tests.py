@@ -4,6 +4,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.utils import timezone
 
+from library import storage
 from library.ingest import ingest
 from library.models import Book, User
 from library.testutils import TempStorage, make_epub
@@ -239,7 +240,7 @@ class AcquisitionTests(OpdsTestCase):
 
     def test_missing_blob_is_a_404_not_a_500(self):
         book = self.add_book("Vanished")
-        book.file_path.unlink()
+        storage.drop(book.sha256)
         with self.assertLogs("opds.views", level="ERROR"):
             response = self.client.get(f"{self.root}book/{book.pk}.epub")
         self.assertEqual(response.status_code, 404)
@@ -250,7 +251,7 @@ class AcquisitionTests(OpdsTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "image/jpeg")
         self.assertEqual(
-            response["Content-Length"], str(book.cover_path.stat().st_size)
+            response["Content-Length"], str(len(storage.read_cover(book.sha256)))
         )
         self.assertEqual(response["ETag"], f'"{book.sha256}-cover"')
 

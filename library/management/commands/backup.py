@@ -1,8 +1,9 @@
 """Nightly backup: the volume is not snapshotted, so this is the only copy.
 
-Produces a consistent database snapshot with VACUUM INTO (safe against a live
-writer, unlike copying the file) and a tar of the blobs, then hands both to
-BACKUP_UPLOAD_CMD if one is configured — e.g.
+The books live in the database, so one artefact is the whole library. VACUUM
+INTO writes a consistent snapshot while the site is running (unlike copying the
+file) and compacts it on the way out, reclaiming the pages that deleted books
+left behind. The snapshot then goes to BACKUP_UPLOAD_CMD if one is configured —
 
     BACKUP_UPLOAD_CMD='rclone copy {path} r2:library-backups/'
 
@@ -13,7 +14,6 @@ import datetime
 import os
 import shlex
 import subprocess
-import tarfile
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -21,14 +21,9 @@ from django.db import connection
 
 
 class Command(BaseCommand):
-    help = "Snapshot the database and books, then push off-box."
+    help = "Snapshot the database — books included — then push it off-box."
 
     def add_arguments(self, parser):
-        parser.add_argument(
-            "--skip-books",
-            action="store_true",
-            help="Database only; the blob tar dominates the runtime.",
-        )
         parser.add_argument("--keep", type=int, default=7, help="Local snapshots kept.")
 
     def handle(self, *args, **options):
@@ -41,17 +36,6 @@ class Command(BaseCommand):
             cursor.execute("VACUUM INTO %s", [str(db_path)])
         self.stdout.write(f"database → {db_path} ({db_path.stat().st_size / 1e6:.1f} MB)")
         artefacts = [db_path]
-
-        if not options["skip_books"]:
-            tar_path = out_dir / f"books-{stamp}.tar"
-            with tarfile.open(tar_path, "w") as tar:
-                tar.add(settings.BOOKS_DIR, arcname="books")
-                if settings.COVERS_DIR.exists():
-                    tar.add(settings.COVERS_DIR, arcname="covers")
-            self.stdout.write(
-                f"blobs → {tar_path} ({tar_path.stat().st_size / 1e6:.1f} MB)"
-            )
-            artefacts.append(tar_path)
 
         template = os.environ.get("BACKUP_UPLOAD_CMD", "").strip()
         if template:
@@ -76,11 +60,10 @@ class Command(BaseCommand):
         self._prune(out_dir, options["keep"])
 
     def _prune(self, out_dir, keep: int):
-        for prefix in ("library-", "books-"):
-            snapshots = sorted(
-                (p for p in out_dir.iterdir() if p.name.startswith(prefix)),
-                reverse=True,
-            )
-            for stale in snapshots[keep:]:
-                stale.unlink()
-                self.stdout.write(f"pruned {stale.name}")
+        snapshots = sorted(
+            (p for p in out_dir.iterdir() if p.name.startswith("library-")),
+            reverse=True,
+        )
+        for stale in snapshots[keep:]:
+            stale.unlink()
+            self.stdout.write(f"pruned {stale.name}")

@@ -1,11 +1,12 @@
 import shutil
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q, Sum
-from django.http import FileResponse, Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
@@ -51,6 +52,7 @@ def shelf(request):
             "books": books,
             "query": query,
             "total": Book.objects.filter(owner=request.user).count(),
+            "max_upload_mb": settings.MAX_UPLOAD_BYTES // (1024 * 1024),
         },
     )
 
@@ -96,9 +98,10 @@ def delete_book(request, pk):
 @login_required
 def cover(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
-    if not book.has_cover or not book.cover_path.exists():
+    data = storage.read_cover(book.sha256) if book.has_cover else None
+    if data is None:
         raise Http404
-    response = FileResponse(open(book.cover_path, "rb"), content_type="image/jpeg")
+    response = HttpResponse(data, content_type="image/jpeg")
     response["Cache-Control"] = "private, max-age=86400"
     return response
 
@@ -122,6 +125,7 @@ def help_page(request):
         Book.objects.filter(owner=request.user).aggregate(total=Sum("size"))["total"]
         or 0
     )
+    db_path = Path(settings.DATABASES["default"]["NAME"])
     return render(
         request,
         "web/help.html",
@@ -129,7 +133,9 @@ def help_page(request):
             "catalog_url": request.build_absolute_uri(request.user.catalog_path),
             "book_count": Book.objects.filter(owner=request.user).count(),
             "library_bytes": library_bytes,
-            "blob_bytes": storage.dir_size(settings.BOOKS_DIR),
+            "blob_bytes": storage.total_bytes(),
+            "db_bytes": db_path.stat().st_size if db_path.exists() else 0,
+            "max_upload_mb": settings.MAX_UPLOAD_BYTES // (1024 * 1024),
             "disk_used_pct": round(usage.used / usage.total * 100) if usage.total else 0,
             "disk_free": usage.free,
             "disk_total": usage.total,

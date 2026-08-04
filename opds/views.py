@@ -13,11 +13,12 @@ import logging
 
 from django.conf import settings
 from django.core.paginator import Paginator
-from django.http import FileResponse, Http404, HttpResponse
+from django.http import Http404, HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 
+from library import storage
 from library.models import Book
 
 from .auth import catalog_token
@@ -133,9 +134,9 @@ def _tracked(chunks, expected: int, book_id: int):
 @catalog_token
 def acquire(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
-    path = book.file_path
-    if not path.exists():
-        logger.error("Book %s missing from volume: %s", book.pk, path)
+    size = storage.size(book.sha256)
+    if size is None:
+        logger.error("Book %s has no stored bytes: %s", book.pk, book.sha256)
         raise Http404
 
     etag = f'"{book.sha256}"'
@@ -145,16 +146,14 @@ def acquire(request, pk):
         response["ETag"] = etag
         return response
 
-    size = path.stat().st_size
-    response = FileResponse(
-        open(path, "rb"),
+    response = StreamingHttpResponse(
+        _tracked(storage.stream(book.sha256), size, book.pk),
         content_type="application/epub+zip",
-        as_attachment=True,
-        filename=book.download_name,
     )
-    response.streaming_content = _tracked(response.streaming_content, size, book.pk)
-    # Set after wrapping the body: explicit length, never chunked encoding —
-    # constrained clients handle a known length far more predictably.
+    # download_name is ASCII by construction, so the plain form is enough.
+    response["Content-Disposition"] = f'attachment; filename="{book.download_name}"'
+    # Explicit length, never chunked encoding — constrained clients handle a
+    # known length far more predictably.
     response["Content-Length"] = str(size)
     response["ETag"] = etag
     response["Cache-Control"] = "private, max-age=0"
@@ -164,8 +163,7 @@ def acquire(request, pk):
 @catalog_token
 def cover(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
-    path = book.cover_path
-    if not book.has_cover or not path.exists():
+    if not book.has_cover:
         raise Http404
 
     etag = f'"{book.sha256}-cover"'
@@ -174,8 +172,12 @@ def cover(request, pk):
         response["ETag"] = etag
         return response
 
-    response = FileResponse(open(path, "rb"), content_type="image/jpeg")
-    response["Content-Length"] = str(path.stat().st_size)
+    data = storage.read_cover(book.sha256)
+    if data is None:
+        raise Http404
+
+    response = HttpResponse(data, content_type="image/jpeg")
+    response["Content-Length"] = str(len(data))
     response["ETag"] = etag
     response["Cache-Control"] = "private, max-age=604800"
     return response

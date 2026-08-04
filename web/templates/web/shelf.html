@@ -6,7 +6,7 @@
   {% csrf_token %}
   <label class="dropzone" for="id_epub">
     <strong>Add EPUBs</strong>
-    <span>Choose one or more files — they land on your shelf and in every reader's Inbox.</span>
+    <span>Choose one or more files — they land on your shelf and in your reader's Inbox. EPUB only, up to {{ max_upload_mb }} MB each.</span>
     <input id="id_epub" type="file" name="epub" accept=".epub,application/epub+zip" multiple
            onchange="this.form.querySelector('button').disabled = !this.files.length; this.nextElementSibling.textContent = this.files.length ? this.files.length + ' file(s) selected' : '';">
     <span class="chosen"></span>

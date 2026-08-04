@@ -34,13 +34,15 @@ if not DEBUG:
 
 # --- Storage on the volume --------------------------------------------------
 
+# Books live in the database file, not beside it; the volume holds that file and
+# the temp directory an upload passes through on its way in.
 DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR / "data"))
-BOOKS_DIR = DATA_DIR / "books"
-COVERS_DIR = DATA_DIR / "covers"
 TMP_DIR = DATA_DIR / "tmp"
-for _d in (DATA_DIR, BOOKS_DIR, COVERS_DIR, TMP_DIR):
+for _d in (DATA_DIR, TMP_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
+# Per file, not per shelf: one book may be this big, and a shelf may hold as
+# many of them as the volume does.
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 COVER_LONG_EDGE = 200
 OPDS_PAGE_SIZE = 50
@@ -96,11 +98,20 @@ TEMPLATES = [
 
 # --- Database ---------------------------------------------------------------
 
+# The database holds the books themselves, so a download is a long-lived reader
+# and an upload is a multi-megabyte writer. WAL is what lets those two coexist:
+# without it a download in progress would block every upload behind it until the
+# reader finished, or until the timeout gave up. IMMEDIATE takes the write lock
+# at BEGIN rather than discovering it is needed halfway through.
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": DATA_DIR / "library.db",
-        "OPTIONS": {"timeout": 5},
+        "OPTIONS": {
+            "timeout": 20,
+            "init_command": "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
+            "transaction_mode": "IMMEDIATE",
+        },
     }
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

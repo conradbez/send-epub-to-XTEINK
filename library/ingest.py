@@ -1,4 +1,9 @@
-"""The upload pipeline: bytes in, one Book row and two blobs out."""
+"""The upload pipeline: bytes in, one Book row and one Blob row out.
+
+An upload lands on disk first — a temp file is the cheapest way to hash and
+parse a book without holding it in memory — and is streamed into the database
+from there once it has proved to be an EPUB.
+"""
 
 import hashlib
 import logging
@@ -82,22 +87,11 @@ def ingest(user, uploaded) -> IngestResult:
             return result
 
         title = meta.title or os.path.splitext(name)[0] or "Untitled"
-        final_path = storage.book_path(sha256)
-        if final_path.exists():
-            # Someone else already uploaded these exact bytes; store once.
-            storage.discard(temp_path)
-        else:
-            storage.place(temp_path, final_path)
-
-        if cover:
-            cover_path = storage.ensure_parent(storage.cover_path(sha256))
-            if not cover_path.exists():
-                tmp_cover = cover_path.with_suffix(f".{uuid.uuid4().hex}.tmp")
-                tmp_cover.write_bytes(cover)
-                os.replace(tmp_cover, cover_path)
 
         try:
+            # The bytes and the row that claims them land together or not at all.
             with transaction.atomic():
+                storage.store(sha256, temp_path, size, cover)
                 result.book = Book.objects.create(
                     owner=user,
                     sha256=sha256,
@@ -107,7 +101,8 @@ def ingest(user, uploaded) -> IngestResult:
                     seq=meta.seq,
                     size=size,
                     filename=name[:500],
-                    has_cover=bool(cover) or storage.cover_path(sha256).exists(),
+                    # store() keeps whichever cover it already had, so ask it.
+                    has_cover=storage.has_cover(sha256),
                 )
                 result.created = True
         except IntegrityError:

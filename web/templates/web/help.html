@@ -48,10 +48,10 @@
 
 <div class="card">
   <h2>Storage</h2>
-  <p>{{ book_count }} book{{ book_count|pluralize }} on your shelf · {{ library_bytes|filesizeformat }} of your own · {{ blob_bytes|filesizeformat }} stored on the volume in total.</p>
+  <p>{{ book_count }} book{{ book_count|pluralize }} on your shelf · {{ library_bytes|filesizeformat }} of your own · {{ blob_bytes|filesizeformat }} of books stored in total, in a {{ db_bytes|filesizeformat }} database.</p>
   <div class="meter{% if disk_used_pct >= 80 %} hot{% endif %}"><span style="width: {{ disk_used_pct }}%"></span></div>
   <p class="hint">Volume {{ disk_used_pct }}% used — {{ disk_free|filesizeformat }} free of {{ disk_total|filesizeformat }}.
   {% if disk_used_pct >= 80 %}<strong>Over 80%: grow the volume in Railway before it fills.</strong>{% endif %}</p>
-  <p class="hint">The volume is not snapshotted. Backups come from the nightly <code>manage.py backup</code>, not from the platform.</p>
+  <p class="hint">Books live inside the database file itself, so the single nightly <code>manage.py backup</code> snapshot is the whole library — nothing on the volume is snapshotted by the platform. One book may be at most {{ max_upload_mb }} MB.</p>
 </div>
 {% endblock %}

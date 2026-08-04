@@ -47,8 +47,30 @@ class User(AbstractUser):
         return self.token
 
 
+class Blob(models.Model):
+    """The bytes themselves, keyed by their own hash.
+
+    One row per distinct file, shared between shelves: two accounts uploading
+    the same book store it once. The columns are declared here and touched
+    nowhere else — `library.storage` streams in and out of them through SQLite's
+    incremental blob I/O rather than through the ORM, which would load a whole
+    book into memory to hand it back.
+    """
+
+    sha256 = models.CharField(primary_key=True, max_length=64)
+    size = models.BigIntegerField()
+    data = models.BinaryField()
+    cover = models.BinaryField(null=True, blank=True)
+
+    def __str__(self):
+        return self.sha256
+
+
 class Book(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name="books")
+    # The Blob's key, deliberately not a foreign key: the bytes are shared and
+    # reference-counted by hand in delete_with_blobs(), and a row whose blob has
+    # gone missing should 404 rather than refuse to exist.
     sha256 = models.CharField(max_length=64, db_index=True)
     title = models.CharField(max_length=500)
     author = models.CharField(max_length=300, blank=True)
@@ -72,24 +94,15 @@ class Book(models.Model):
         return self.title
 
     @property
-    def file_path(self):
-        return storage.book_path(self.sha256)
-
-    @property
-    def cover_path(self):
-        return storage.cover_path(self.sha256)
-
-    @property
     def download_name(self) -> str:
         return storage.safe_download_name(self.filename, self.title)
 
     def delete_with_blobs(self) -> None:
-        """Remove the row, and the files too if nobody else owns those bytes."""
+        """Remove the row, and the bytes too if nobody else owns them."""
         sha256 = self.sha256
         self.delete()
         if not Book.objects.filter(sha256=sha256).exists():
-            storage.discard(storage.book_path(sha256))
-            storage.discard(storage.cover_path(sha256))
+            storage.drop(sha256)
 
     @property
     def byline(self) -> str:

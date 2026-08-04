@@ -11,18 +11,19 @@ from PIL import Image
 
 
 class TempStorage:
-    """Point the volume at a throwaway directory for the duration of a class."""
+    """Point the volume at a throwaway directory for the duration of a class.
+
+    Only uploads in flight touch the disk now — the books themselves land in the
+    test database, which Django throws away on its own.
+    """
 
     @classmethod
     def setUpClass(cls):
         cls._tmpdir = tempfile.TemporaryDirectory()
         root = Path(cls._tmpdir.name)
-        for name in ("books", "covers", "tmp"):
-            (root / name).mkdir()
+        (root / "tmp").mkdir()
         cls._storage_override = override_settings(
             DATA_DIR=root,
-            BOOKS_DIR=root / "books",
-            COVERS_DIR=root / "covers",
             TMP_DIR=root / "tmp",
             FILE_UPLOAD_TEMP_DIR=str(root / "tmp"),
         )
