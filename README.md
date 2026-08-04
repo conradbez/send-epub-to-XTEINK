@@ -10,13 +10,18 @@ EPUB only. Django + SQLite on a single Railway volume. Built for one household
 
 - **Upload** through `/` — one or many files, from a phone if you like.
 - Each book lands on **your** shelf. Shelves are per user, not a shared pile.
-- Each reader authenticates as its own **device** and sees an **Inbox**: the
-  books that device has not downloaded yet. Downloading one removes it from
-  that device's Inbox and nowhere else. That is what keeps an on-device catalog
-  usable when the firmware has no search.
-- `/help/` renders the real catalog URL, the device list, and the on-device
-  steps for the account looking at it. Setting up a new reader needs nothing
-  but that page.
+- Each reader gets a **capability URL** — `https://books.tld/k/<token>/` — and
+  that one string is the whole credential. No username, no password field, and
+  nothing to type on a five-way keyboard.
+- That URL **is** the reader's **Inbox**: the books this device has not
+  downloaded yet. The catalog opens on exactly the new books, zero navigation,
+  which is what keeps it usable when the firmware has no search. *All Books*
+  and *Recent* hang off the end of the Inbox as sub-feeds.
+- Downloading a book removes it from that device's Inbox and nowhere else.
+- `/help/` renders each reader's real link behind a big **Copy** button, and
+  leads with the route that involves no on-device typing at all: open the
+  reader's own web page from your phone and paste. Setting up a new reader
+  needs nothing but that page.
 
 ## Local development
 
@@ -42,9 +47,17 @@ Run the tests:
 ```
 config/    settings, urls, wsgi
 library/   models, upload pipeline, EPUB parsing, management commands
-opds/      Atom feeds, Basic-auth decorator, delivery tracking
+opds/      Atom feeds, capability-URL decorator, delivery tracking
 web/       shelf, devices, /help/
 ```
+
+### About the token
+
+It is 16 characters from a 31-character alphabet with no ambiguous glyphs, and
+it is stored in the clear — `/help/` shows a reader's link whenever you ask, so
+a lost link is re-read rather than reset. Because it rides in the path it does
+reach access logs; that is the trade for a setup with nothing to type. Rotate
+any link from `/devices/` and the old one dies at once.
 
 Dependencies, complete: `django`, `gunicorn`, `whitenoise`, `pillow`. EPUB
 parsing is stdlib `zipfile` + `xml.etree`.
@@ -88,6 +101,11 @@ python manage.py backup && python manage.py sweep_tmp
   during the TLS handshake and cannot reach an HTTPS host at all. If the
   handshake is a problem, the same container runs fine on a LAN box over plain
   HTTP.
+- The firmware no longer auto-appends `/opds` to the URL you give it, so the
+  token URL is the entry point exactly as pasted.
+- Setup happens from a phone: **Home → File Transfer → Join Network** puts the
+  reader's own web page on the LAN (it shows a QR code), and its *OPDS Servers*
+  card takes the pasted link. Leaving File Transfer mode stops that server.
 - Firmware 1.5.0+ can configure the OPDS download folder and filename format.
 
 ## Deliberately not here

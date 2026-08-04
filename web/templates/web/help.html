@@ -12,14 +12,15 @@
   {% for device in devices %}
   <div class="linkrow">
     <div class="linkrow-text">
-      <span class="who">{{ device.name }}
+      <div class="who">
+        <span>{{ device.name }}</span>
         <form method="post" action="{% url 'device_reset' device.pk %}"
               onsubmit="return confirm('Issue a new link for {{ device.name|escapejs }}? The old one stops working immediately.');">
           {% csrf_token %}
           <input type="hidden" name="next" value="{{ request.path }}">
           <button class="link">New link</button>
         </form>
-      </span>
+      </div>
       <code class="url" data-copy>{{ device.catalog_url }}</code>
     </div>
     <button type="button" class="copy" data-copy="{{ device.catalog_url }}">Copy</button>
