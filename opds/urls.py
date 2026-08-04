@@ -6,7 +6,7 @@ from . import views
 
 
 class TokenConverter:
-    """Only ever matches strings shaped like a device token."""
+    """Only ever matches strings shaped like a catalog token."""
 
     regex = f"[{TOKEN_ALPHABET}]{{8,64}}"
 

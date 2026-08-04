@@ -1,27 +1,26 @@
 """OPDS 1.2 feeds, rendered as Atom templates.
 
 Serving rules that matter on e-ink firmware: every response carries an explicit
-Content-Length and ETag, feeds are capped at 50 entries, and a Delivery row is
-written only once the last byte has actually left — a cancelled download stays
+Content-Length and ETag, feeds are capped at 50 entries, and a book is marked
+delivered only once the last byte has actually left — a cancelled download stays
 in the Inbox.
 
-Every URL carries the device's token, so a feed can only ever link to feeds for
-the same device. There is no shared entry point to get lost in.
+Every URL carries the account's token, so a feed can only ever link to feeds for
+the same shelf. There is no shared entry point to get lost in.
 """
 
 import logging
 
 from django.conf import settings
 from django.core.paginator import Paginator
-from django.db import IntegrityError
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 
-from library.models import Book, Delivery
+from library.models import Book
 
-from .auth import device_token
+from .auth import catalog_token
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +28,7 @@ ACQUISITION_TYPE = "application/atom+xml;profile=opds-catalog;kind=acquisition"
 
 
 def _url(request, name, *args) -> str:
-    return reverse(name, args=[request.device.token, *args])
+    return reverse(name, args=[request.user.token, *args])
 
 
 def _feed_response(request, context):
@@ -48,8 +47,7 @@ def _acquisition_feed(request, title, queryset, path, paginate=True, sections=()
         "self_url": request.build_absolute_uri(path),
         "start_url": request.build_absolute_uri(_url(request, "opds_root")),
         "updated": timezone.now(),
-        "device": request.device,
-        "token": request.device.token,
+        "token": request.user.token,
         "sections": sections,
     }
     if paginate:
@@ -70,15 +68,15 @@ def _acquisition_feed(request, title, queryset, path, paginate=True, sections=()
     return _feed_response(request, context)
 
 
-@device_token
+@catalog_token
 def inbox(request):
-    """The root feed: books this user owns that *this* device has not taken.
+    """The root feed: books on this shelf the reader has not taken yet.
 
     All Books and Recent hang off the end of it as sub-feeds, so the catalog
     opens on the new books and navigation is something you opt into.
     """
     owned = Book.objects.filter(owner=request.user)
-    queryset = owned.exclude(deliveries__device=request.device).order_by("-added_at")
+    queryset = owned.filter(delivered_at__isnull=True).order_by("-added_at")
     sections = [
         {
             "title": "All Books",
@@ -96,7 +94,7 @@ def inbox(request):
     )
 
 
-@device_token
+@catalog_token
 def all_books(request):
     queryset = Book.objects.filter(owner=request.user).order_by("title")
     return _acquisition_feed(
@@ -104,7 +102,7 @@ def all_books(request):
     )
 
 
-@device_token
+@catalog_token
 def recent(request):
     queryset = Book.objects.filter(owner=request.user).order_by("-added_at")[:50]
     return _acquisition_feed(
@@ -112,26 +110,27 @@ def recent(request):
     )
 
 
-def _record_delivery(book_id: int, device_id: int) -> None:
+def _record_delivery(book_id: int) -> None:
     try:
-        Delivery.objects.get_or_create(book_id=book_id, device_id=device_id)
-    except IntegrityError:
-        pass
+        # Only the first delivery stamps a time; downloading again is a no-op.
+        Book.objects.filter(pk=book_id, delivered_at__isnull=True).update(
+            delivered_at=timezone.now()
+        )
     except Exception:
-        logger.exception("Could not record delivery %s → %s", book_id, device_id)
+        logger.exception("Could not record delivery of %s", book_id)
 
 
-def _tracked(chunks, expected: int, book_id: int, device_id: int):
+def _tracked(chunks, expected: int, book_id: int):
     """Yield the file, then record the delivery — only if it all got out."""
     sent = 0
     for chunk in chunks:
         sent += len(chunk)
         yield chunk
     if sent >= expected:
-        _record_delivery(book_id, device_id)
+        _record_delivery(book_id)
 
 
-@device_token
+@catalog_token
 def acquire(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
     path = book.file_path
@@ -153,9 +152,7 @@ def acquire(request, pk):
         as_attachment=True,
         filename=book.download_name,
     )
-    response.streaming_content = _tracked(
-        response.streaming_content, size, book.pk, request.device.pk
-    )
+    response.streaming_content = _tracked(response.streaming_content, size, book.pk)
     # Set after wrapping the body: explicit length, never chunked encoding —
     # constrained clients handle a known length far more predictably.
     response["Content-Length"] = str(size)
@@ -164,7 +161,7 @@ def acquire(request, pk):
     return response
 
 
-@device_token
+@catalog_token
 def cover(request, pk):
     book = get_object_or_404(Book, pk=pk, owner=request.user)
     path = book.cover_path

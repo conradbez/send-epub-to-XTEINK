@@ -1,26 +1,27 @@
 # Personal OPDS Library
 
 A one-way conveyor for EPUBs: upload from any browser, and the book appears in
-the **Inbox** of every reader you own. No cable, no Calibre, no PC in the loop.
+your reader's **Inbox**. No cable, no Calibre, no PC in the loop.
 
-EPUB only. Django + SQLite on a single Railway volume. Built for one household
-(~5 users, ~10 Crosspoint readers), and sized for exactly that.
+EPUB only. **One account, one reader** — if two people share a house they get
+two accounts. Django + SQLite on a single Railway volume. Built for one
+household (~5 users), and sized for exactly that.
 
 ## How it works
 
 - **Upload** through `/` — one or many files, from a phone if you like.
 - Each book lands on **your** shelf. Shelves are per user, not a shared pile.
-- Each reader gets a **capability URL** — `https://books.tld/k/<token>/` — and
-  that one string is the whole credential. No username, no password field, and
-  nothing to type on a five-way keyboard.
-- That URL **is** the reader's **Inbox**: the books this device has not
-  downloaded yet. The catalog opens on exactly the new books, zero navigation,
-  which is what keeps it usable when the firmware has no search. *All Books*
-  and *Recent* hang off the end of the Inbox as sub-feeds.
-- Downloading a book removes it from that device's Inbox and nowhere else.
-- `/help/` renders each reader's real link behind a big **Copy** button, and
-  leads with the route that involves no on-device typing at all: open the
-  reader's own web page from your phone and paste. Setting up a new reader
+- Each account has one **capability URL** — `https://books.tld/k/<token>/` —
+  and that one string is the whole credential. No username, no password field,
+  and nothing to type on a five-way keyboard.
+- That URL **is** your **Inbox**: the books you have not downloaded yet. The
+  catalog opens on exactly the new books, zero navigation, which is what keeps
+  it usable when the firmware has no search. *All Books* and *Recent* hang off
+  the end of the Inbox as sub-feeds.
+- Downloading a book stamps `Book.delivered_at` and it leaves the Inbox. That
+  one column is the entire delivery record.
+- `/help/` renders your real link behind a big **Copy** button and gives two
+  steps: copy it, paste it into the reader from your phone. Setting up a reader
   needs nothing but that page.
 
 ## Local development
@@ -48,16 +49,16 @@ Run the tests:
 config/    settings, urls, wsgi
 library/   models, upload pipeline, EPUB parsing, management commands
 opds/      Atom feeds, capability-URL decorator, delivery tracking
-web/       shelf, devices, /help/
+web/       shelf, /help/
 ```
 
 ### About the token
 
 It is 16 characters from a 31-character alphabet with no ambiguous glyphs, and
-it is stored in the clear — `/help/` shows a reader's link whenever you ask, so
-a lost link is re-read rather than reset. Because it rides in the path it does
-reach access logs; that is the trade for a setup with nothing to type. Rotate
-any link from `/devices/` and the old one dies at once.
+it is stored in the clear — `/help/` shows your link whenever you ask, so a lost
+link is re-read rather than reset. Because it rides in the path it does reach
+access logs; that is the trade for a setup with nothing to type. Rotate it from
+`/help/` and the old one dies at once; the web login is unaffected.
 
 Dependencies, complete: `django`, `gunicorn`, `whitenoise`, `pillow`. EPUB
 parsing is stdlib `zipfile` + `xml.etree`.

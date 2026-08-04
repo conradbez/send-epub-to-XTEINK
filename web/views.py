@@ -4,20 +4,20 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Q, Sum
+from django.db.models import Q, Sum
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
 
 from library import storage
 from library.ingest import ingest
-from library.models import Book, Device
+from library.models import Book
 
-from .forms import DeviceForm, SignupForm
+from .forms import SignupForm
 
 
 def signup(request):
-    """Open registration: each account gets its own shelf and devices."""
+    """Open registration: each account gets its own shelf and its own link."""
     if request.user.is_authenticated:
         return redirect("shelf")
 
@@ -104,60 +104,15 @@ def cover(request, pk):
 
 
 @login_required
-def devices(request):
-    if request.method == "POST":
-        form = DeviceForm(request.POST)
-        if form.is_valid():
-            device = Device.objects.create(
-                user=request.user, name=form.cleaned_data["name"]
-            )
-            messages.success(
-                request, f"Added {device.name}. Its catalog link is below."
-            )
-            return redirect("devices")
-    else:
-        form = DeviceForm()
-
-    return render(
-        request,
-        "web/devices.html",
-        {"form": form, "devices": _devices_for(request)},
-    )
-
-
-@login_required
 @require_POST
-def device_reset(request, pk):
-    device = get_object_or_404(Device, pk=pk, user=request.user)
-    device.rotate_token()
+def reset_link(request):
+    """One link per account, so rotating it is the only device management left."""
+    request.user.rotate_token()
     messages.success(
         request,
-        f"New link for {device.name}. The old one stopped working — paste the "
-        "new one into that reader.",
+        "New link. The old one stopped working — paste the new one into your reader.",
     )
-    return redirect(request.POST.get("next") or "devices")
-
-
-@login_required
-@require_POST
-def device_rename(request, pk):
-    device = get_object_or_404(Device, pk=pk, user=request.user)
-    name = request.POST.get("name", "").strip()
-    if name:
-        device.name = name[:100]
-        device.save(update_fields=["name"])
-        messages.success(request, "Renamed.")
-    return redirect("devices")
-
-
-@login_required
-@require_POST
-def device_revoke(request, pk):
-    device = get_object_or_404(Device, pk=pk, user=request.user)
-    name = device.name
-    device.delete()
-    messages.success(request, f"Revoked {name}. It can no longer reach the catalog.")
-    return redirect("devices")
+    return redirect("help")
 
 
 @login_required
@@ -171,8 +126,7 @@ def help_page(request):
         request,
         "web/help.html",
         {
-            "devices": _devices_for(request),
-            "form": DeviceForm(),
+            "catalog_url": request.build_absolute_uri(request.user.catalog_path),
             "book_count": Book.objects.filter(owner=request.user).count(),
             "library_bytes": library_bytes,
             "blob_bytes": storage.dir_size(settings.BOOKS_DIR),
@@ -182,15 +136,3 @@ def help_page(request):
             "insecure_host": not request.is_secure(),
         },
     )
-
-
-def _devices_for(request):
-    """Devices, each carrying the absolute catalog URL to paste into it."""
-    devices = list(
-        Device.objects.filter(user=request.user)
-        .annotate(delivered=Count("deliveries"))
-        .order_by("name")
-    )
-    for device in devices:
-        device.catalog_url = request.build_absolute_uri(device.catalog_path)
-    return devices

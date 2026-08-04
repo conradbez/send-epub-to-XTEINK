@@ -13,39 +13,28 @@ TOKEN_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
 TOKEN_LENGTH = 16
 
 
+def make_token() -> str:
+    """The whole credential: no username, no password field, one string.
+
+    No uniqueness check: at ~79 bits a collision is not a thing that happens,
+    and the column's unique constraint is there if it ever did. Django's system
+    checks instantiate User(), so this must not touch the database.
+    """
+    return "".join(secrets.choice(TOKEN_ALPHABET) for _ in range(TOKEN_LENGTH))
+
+
 class User(AbstractUser):
-    pass
+    """An account and its one reader — the same thing, addressed two ways.
 
-
-def make_device_token() -> str:
-    """The whole credential: no username, no password field, one string."""
-    for _ in range(20):
-        candidate = "".join(secrets.choice(TOKEN_ALPHABET) for _ in range(TOKEN_LENGTH))
-        if not Device.objects.filter(token=candidate).exists():
-            return candidate
-    raise RuntimeError("Could not mint a unique device token")
-
-
-class Device(models.Model):
-    """A reader, authenticated by a capability URL rather than a password.
-
-    The token is the credential and it is stored in the clear: /help/ shows each
-    reader's link whenever you ask, so a lost link is re-read rather than reset.
-    It travels in the path, so it lands in access logs — the trade for a setup
-    that never touches the on-device keyboard. Rotate from /devices/.
+    The web side is username + password; the reader side is the token, and the
+    token is the whole credential. It is stored in the clear: /help/ shows the
+    link whenever you ask, so a lost link is re-read rather than reset. It
+    travels in the path, so it lands in access logs — the trade for a setup that
+    never touches the on-device keyboard. Rotate it from /help/.
     """
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="devices")
-    name = models.CharField(max_length=100)
-    token = models.CharField(max_length=64, unique=True, default=make_device_token)
+    token = models.CharField(max_length=64, unique=True, default=make_token)
     last_seen = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ["name"]
-
-    def __str__(self):
-        return self.name
 
     @property
     def catalog_path(self) -> str:
@@ -53,7 +42,7 @@ class Device(models.Model):
 
     def rotate_token(self) -> str:
         """Old link dies immediately; the reader needs the new one pasted in."""
-        self.token = make_device_token()
+        self.token = make_token()
         self.save(update_fields=["token"])
         return self.token
 
@@ -69,6 +58,9 @@ class Book(models.Model):
     filename = models.CharField(max_length=500)
     has_cover = models.BooleanField(default=False)
     added_at = models.DateTimeField(auto_now_add=True)
+    # Null means it is still in the Inbox. One reader per account, so this is
+    # the whole delivery record.
+    delivered_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-added_at"]
@@ -107,19 +99,3 @@ class Book(models.Model):
                 f"{self.series} #{self.seq:g}" if self.seq is not None else self.series
             )
         return " — ".join(bits)
-
-
-class Delivery(models.Model):
-    book = models.ForeignKey(Book, on_delete=models.CASCADE, related_name="deliveries")
-    device = models.ForeignKey(
-        Device, on_delete=models.CASCADE, related_name="deliveries"
-    )
-    downloaded_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = [
-            UniqueConstraint(fields=["book", "device"], name="uniq_book_device")
-        ]
-
-    def __str__(self):
-        return f"{self.book_id} → {self.device_id}"

@@ -2,9 +2,10 @@ from xml.etree import ElementTree
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 
 from library.ingest import ingest
-from library.models import Book, Delivery, Device, User
+from library.models import Book, User
 from library.testutils import TempStorage, make_epub
 
 from .views import _tracked
@@ -15,8 +16,7 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 class OpdsTestCase(TempStorage, TestCase):
     def setUp(self):
         self.user = User.objects.create_user("reader", password="x")
-        self.device = Device.objects.create(user=self.user, name="Lounge X4")
-        self.root = self.device.catalog_path
+        self.root = self.user.catalog_path
 
     def add_book(self, title="A Book", owner=None):
         payload = make_epub(title=title)
@@ -31,6 +31,11 @@ class OpdsTestCase(TempStorage, TestCase):
         return [
             entry.find(f"{ATOM}title").text for entry in root.findall(f"{ATOM}entry")
         ]
+
+    def delivered(self, book) -> bool:
+        return (
+            Book.objects.filter(pk=book.pk, delivered_at__isnull=False).exists()
+        )
 
 
 class AuthTests(OpdsTestCase):
@@ -50,18 +55,18 @@ class AuthTests(OpdsTestCase):
 
     def test_a_rotated_link_kills_the_old_one(self):
         stale = self.root
-        self.device.rotate_token()
+        self.user.rotate_token()
         self.assertEqual(self.client.get(stale).status_code, 404)
-        self.assertEqual(self.client.get(self.device.catalog_path).status_code, 200)
+        self.assertEqual(self.client.get(self.user.catalog_path).status_code, 200)
 
-    def test_revoked_device_loses_access(self):
-        self.device.delete()
+    def test_a_deleted_account_loses_access(self):
+        self.user.delete()
         self.assertEqual(self.client.get(self.root).status_code, 404)
 
     def test_successful_request_records_last_seen(self):
         self.client.get(self.root)
-        self.device.refresh_from_db()
-        self.assertIsNotNone(self.device.last_seen)
+        self.user.refresh_from_db()
+        self.assertIsNotNone(self.user.last_seen)
 
 
 class RootFeedTests(OpdsTestCase):
@@ -110,7 +115,7 @@ class FeedTests(OpdsTestCase):
         self.assertIn("kind=acquisition", response["Content-Type"])
         self.assertEqual(self.titles(root), ["Mine"])
 
-    def test_entry_links_carry_this_devices_token(self):
+    def test_entry_links_carry_the_same_token(self):
         book = self.add_book("Linked")
         root, _ = self.feed(f"{self.root}all/")
         links = {link.get("rel"): link for link in root.iter(f"{ATOM}link")}
@@ -150,22 +155,18 @@ class InboxTests(OpdsTestCase):
     def test_inbox_holds_undelivered_books_only(self):
         first = self.add_book("First")
         self.add_book("Second")
-        Delivery.objects.create(book=first, device=self.device)
+        Book.objects.filter(pk=first.pk).update(delivered_at=timezone.now())
 
         root, _ = self.feed(self.root)
         self.assertEqual(self.titles(root)[0], "Second")
         self.assertNotIn("First", self.titles(root))
 
-    def test_inbox_is_per_device(self):
-        book = self.add_book("Shared")
-        other = Device.objects.create(user=self.user, name="Bedroom X3")
-        Delivery.objects.create(book=book, device=self.device)
+    def test_a_delivered_book_is_still_in_all_books(self):
+        book = self.add_book("Taken")
+        Book.objects.filter(pk=book.pk).update(delivered_at=timezone.now())
 
-        root, _ = self.feed(self.root)
-        self.assertNotIn("Shared", self.titles(root))
-
-        other_root, _ = self.feed(other.catalog_path)
-        self.assertEqual(self.titles(other_root)[0], "Shared")
+        root, _ = self.feed(f"{self.root}all/")
+        self.assertEqual(self.titles(root), ["Taken"])
 
 
 class AcquisitionTests(OpdsTestCase):
@@ -180,41 +181,40 @@ class AcquisitionTests(OpdsTestCase):
         self.assertNotIn("Transfer-Encoding", response)
         self.assertIn('filename="b.epub"', response["Content-Disposition"])
 
-        self.assertFalse(Delivery.objects.exists(), "not delivered until bytes leave")
+        self.assertFalse(self.delivered(book), "not delivered until bytes leave")
         body = b"".join(response.streaming_content)
         self.assertEqual(len(body), book.size)
-        self.assertTrue(
-            Delivery.objects.filter(book=book, device=self.device).exists()
-        )
+        self.assertTrue(self.delivered(book))
 
     def test_abandoned_download_stays_in_the_inbox(self):
         book = self.add_book("Interrupted")
         response = self.client.get(f"{self.root}book/{book.pk}.epub")
         # The reader drops the connection after one chunk: the WSGI server stops
         # iterating and closes the body, so the tracking generator never finishes.
-        stream = _tracked(
-            iter([b"a" * 100, b"b" * 100]), book.size, book.pk, self.device.pk
-        )
+        stream = _tracked(iter([b"a" * 100, b"b" * 100]), book.size, book.pk)
         next(stream)
         stream.close()
         response.close()
 
-        self.assertFalse(Delivery.objects.exists())
+        self.assertFalse(self.delivered(book))
         root, _ = self.feed(self.root)
         self.assertEqual(self.titles(root)[0], "Interrupted")
 
     def test_truncated_body_is_not_a_delivery(self):
         book = self.add_book("Cut short")
-        stream = _tracked(iter([b"only some bytes"]), book.size, book.pk, self.device.pk)
-        list(stream)
-        self.assertFalse(Delivery.objects.exists())
+        list(_tracked(iter([b"only some bytes"]), book.size, book.pk))
+        self.assertFalse(self.delivered(book))
 
-    def test_repeat_download_is_idempotent(self):
+    def test_repeat_download_keeps_the_first_delivery_time(self):
         book = self.add_book("Twice")
+        stamps = []
         for _ in range(2):
             response = self.client.get(f"{self.root}book/{book.pk}.epub")
             b"".join(response.streaming_content)
-        self.assertEqual(Delivery.objects.count(), 1)
+            book.refresh_from_db()
+            stamps.append(book.delivered_at)
+        self.assertIsNotNone(stamps[0])
+        self.assertEqual(stamps[0], stamps[1])
 
     def test_if_none_match_returns_304_and_delivers_nothing(self):
         book = self.add_book("Cached")
@@ -223,7 +223,7 @@ class AcquisitionTests(OpdsTestCase):
             headers={"if-none-match": f'"{book.sha256}"'},
         )
         self.assertEqual(response.status_code, 304)
-        self.assertFalse(Delivery.objects.exists())
+        self.assertFalse(self.delivered(book))
 
     def test_another_users_book_is_not_reachable(self):
         stranger = User.objects.create_user("stranger", password="x")
@@ -231,11 +231,10 @@ class AcquisitionTests(OpdsTestCase):
         response = self.client.get(f"{self.root}book/{book.pk}.epub")
         self.assertEqual(response.status_code, 404)
 
-    def test_a_book_is_not_reachable_through_another_devices_token(self):
+    def test_a_book_is_not_reachable_through_another_accounts_token(self):
         stranger = User.objects.create_user("stranger", password="x")
-        theirs = Device.objects.create(user=stranger, name="Theirs")
         book = self.add_book("Mine")
-        response = self.client.get(f"{theirs.catalog_path}book/{book.pk}.epub")
+        response = self.client.get(f"{stranger.catalog_path}book/{book.pk}.epub")
         self.assertEqual(response.status_code, 404)
 
     def test_missing_blob_is_a_404_not_a_500(self):

@@ -1,10 +1,8 @@
-import io
-
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from library.ingest import ingest
-from library.models import Book, Device, User
+from library.models import Book, User
 from library.testutils import TempStorage, make_epub
 
 
@@ -22,7 +20,7 @@ class WebTestCase(TempStorage, TestCase):
 class AccessTests(WebTestCase):
     def test_every_page_needs_a_session(self):
         self.client.logout()
-        for url in ("/", "/devices/", "/help/"):
+        for url in ("/", "/help/"):
             response = self.client.get(url)
             self.assertEqual(response.status_code, 302)
             self.assertIn("/login/", response["Location"])
@@ -98,76 +96,48 @@ class ShelfTests(WebTestCase):
         )
 
 
-class DeviceTests(WebTestCase):
-    def test_creating_a_device_shows_its_catalog_link(self):
-        response = self.client.post("/devices/", {"name": "Lounge X4"}, follow=True)
-        device = Device.objects.get()
-
-        self.assertContains(response, f"http://testserver/k/{device.token}/")
+class CatalogLinkTests(WebTestCase):
+    def test_an_account_has_a_link_from_the_moment_it_exists(self):
+        response = self.client.get("/help/")
+        self.assertContains(response, f"http://testserver/k/{self.user.token}/")
 
     def test_the_link_stays_visible_there_is_nothing_to_write_down(self):
-        self.client.post("/devices/", {"name": "Lounge X4"}, follow=True)
-        device = Device.objects.get()
-        for url in ("/devices/", "/help/"):
-            self.assertContains(self.client.get(url), device.token)
+        for _ in range(2):
+            self.assertContains(self.client.get("/help/"), self.user.token)
 
     def test_reset_issues_a_new_link_and_kills_the_old_one(self):
-        self.client.post("/devices/", {"name": "X3"}, follow=True)
-        device = Device.objects.get()
-        old = device.token
+        old = self.user.token
 
-        response = self.client.post(f"/devices/{device.pk}/reset/", follow=True)
+        response = self.client.post("/help/new-link/", follow=True)
 
-        device.refresh_from_db()
-        self.assertNotEqual(old, device.token)
+        self.user.refresh_from_db()
+        self.assertNotEqual(old, self.user.token)
         self.assertNotContains(response, old)
-        self.assertContains(response, device.token)
-
-    def test_rename_and_revoke(self):
-        self.client.post("/devices/", {"name": "Old name"}, follow=True)
-        device = Device.objects.get()
-
-        self.client.post(f"/devices/{device.pk}/rename/", {"name": "Lounge X4"})
-        device.refresh_from_db()
-        self.assertEqual(device.name, "Lounge X4")
-
-        self.client.post(f"/devices/{device.pk}/revoke/", follow=True)
-        self.assertEqual(Device.objects.count(), 0)
-
-    def test_cannot_touch_another_users_device(self):
-        stranger = User.objects.create_user("stranger", password="x")
-        device = Device.objects.create(user=stranger, name="Not yours")
-        for url in (f"/devices/{device.pk}/reset/", f"/devices/{device.pk}/revoke/"):
-            self.assertEqual(self.client.post(url).status_code, 404)
+        self.assertContains(response, self.user.token)
 
     def test_another_users_link_is_never_shown(self):
         stranger = User.objects.create_user("stranger", password="x")
-        device = Device.objects.create(user=stranger, name="Not yours")
-        for url in ("/devices/", "/help/"):
-            self.assertNotContains(self.client.get(url), device.token)
+        self.assertNotContains(self.client.get("/help/"), stranger.token)
 
 
 class HelpPageTests(WebTestCase):
-    def test_shows_a_real_pastable_link_per_reader_not_a_placeholder(self):
-        device = Device.objects.create(user=self.user, name="Lounge X4")
+    def test_shows_a_real_pastable_link_not_a_placeholder(self):
         response = self.client.get("/help/")
 
-        self.assertContains(response, "Lounge X4")
-        self.assertContains(response, f"http://testserver/k/{device.token}/")
+        self.assertContains(response, f"http://testserver/k/{self.user.token}/")
         self.assertNotContains(response, "example.com")
 
     def test_the_copy_button_carries_the_url(self):
-        device = Device.objects.create(user=self.user, name="Lounge X4")
         response = self.client.get("/help/")
         self.assertContains(
-            response, f'data-copy="http://testserver/k/{device.token}/">Copy'
+            response, f'data-copy="http://testserver/k/{self.user.token}/">Copy'
         )
 
-    def test_leads_with_the_paste_route_and_keeps_typing_as_the_fallback(self):
+    def test_copy_the_link_comes_before_pasting_it(self):
         content = self.client.get("/help/").content.decode()
         self.assertLess(
-            content.index("Paste it in from your phone"),
-            content.index("If you have no phone to hand"),
+            content.index("Copy your link"),
+            content.index("Paste it into the reader"),
         )
         self.assertIn("File Transfer", content)   # how the reader's web UI opens
         self.assertIn("OPDS Servers", content)    # the card you paste into
@@ -178,7 +148,6 @@ class HelpPageTests(WebTestCase):
         self.assertIn("v1.3.0", content)          # TLS handshake OOM
         self.assertIn("All Books", content)       # re-download after Inbox
         self.assertIn("EPUB only", content)       # nothing else is accepted
-        self.assertIn("Settings", content)        # typing it in by hand
 
     def test_reports_storage_use(self):
         self.add_book("Weighty")

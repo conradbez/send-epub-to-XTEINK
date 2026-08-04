@@ -8,11 +8,8 @@ urlpatterns = [
     path("upload/", views.upload, name="upload"),
     path("book/<int:pk>/delete/", views.delete_book, name="delete_book"),
     path("book/<int:pk>/cover.jpg", views.cover, name="shelf_cover"),
-    path("devices/", views.devices, name="devices"),
-    path("devices/<int:pk>/reset/", views.device_reset, name="device_reset"),
-    path("devices/<int:pk>/rename/", views.device_rename, name="device_rename"),
-    path("devices/<int:pk>/revoke/", views.device_revoke, name="device_revoke"),
     path("help/", views.help_page, name="help"),
+    path("help/new-link/", views.reset_link, name="reset_link"),
     path(
         "login/",
         auth_views.LoginView.as_view(template_name="web/login.html"),

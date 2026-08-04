@@ -8,7 +8,7 @@ from django.test import TestCase, TransactionTestCase, override_settings
 
 from . import epub, storage
 from .ingest import ingest
-from .models import Book, Device, User
+from .models import Book, User
 from .testutils import TempStorage, make_epub, upload_file
 
 
@@ -151,10 +151,12 @@ class StorageTests(TestCase):
         self.assertEqual(storage.safe_download_name("", "Fallback Title"), "Fallback Title.epub")
 
 
-class DeviceTests(TestCase):
-    def test_a_device_gets_a_unique_unambiguous_token(self):
-        user = User.objects.create_user("reader", password="x")
-        tokens = {Device.objects.create(user=user, name="X4").token for _ in range(5)}
+class CatalogTokenTests(TestCase):
+    def test_every_account_gets_a_unique_unambiguous_token(self):
+        tokens = {
+            User.objects.create_user(f"reader{n}", password="x").token
+            for n in range(5)
+        }
         self.assertEqual(len(tokens), 5)
         for token in tokens:
             self.assertEqual(len(token), 16)
@@ -163,18 +165,16 @@ class DeviceTests(TestCase):
 
     def test_the_catalog_path_carries_the_token(self):
         user = User.objects.create_user("reader", password="x")
-        device = Device.objects.create(user=user, name="Lounge X4")
-        self.assertEqual(device.catalog_path, f"/k/{device.token}/")
+        self.assertEqual(user.catalog_path, f"/k/{user.token}/")
 
     def test_rotating_kills_the_old_link(self):
         user = User.objects.create_user("reader", password="x")
-        device = Device.objects.create(user=user, name="Lounge X4")
-        old = device.token
-        new = device.rotate_token()
+        old = user.token
+        new = user.rotate_token()
 
         self.assertNotEqual(old, new)
-        device.refresh_from_db()
-        self.assertEqual(device.token, new)
+        user.refresh_from_db()
+        self.assertEqual(user.token, new)
 
 
 class SweepTmpTests(TempStorage, TestCase):

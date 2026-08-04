@@ -8,7 +8,12 @@ import secrets
 
 from django.db import migrations, models
 
-import library.models
+from library.models import TOKEN_ALPHABET, TOKEN_LENGTH
+
+
+def make_device_token():
+    """Frozen here: the model's own minting function has since moved to User."""
+    return "".join(secrets.choice(TOKEN_ALPHABET) for _ in range(TOKEN_LENGTH))
 
 
 def mint_tokens(apps, schema_editor):
@@ -16,10 +21,7 @@ def mint_tokens(apps, schema_editor):
     seen = set()
     for device in Device.objects.all():
         while True:
-            token = "".join(
-                secrets.choice(library.models.TOKEN_ALPHABET)
-                for _ in range(library.models.TOKEN_LENGTH)
-            )
+            token = make_device_token()
             if token not in seen:
                 break
         seen.add(token)
@@ -45,7 +47,7 @@ class Migration(migrations.Migration):
             model_name="device",
             name="token",
             field=models.CharField(
-                default=library.models.make_device_token, max_length=64, unique=True
+                default=make_device_token, max_length=64, unique=True
             ),
         ),
         migrations.RemoveField(model_name="device", name="basic_user"),

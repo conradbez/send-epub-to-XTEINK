@@ -13,8 +13,7 @@
   {% if user.is_authenticated %}
     <nav>
       <a href="{% url 'shelf' %}"{% if request.resolver_match.url_name == 'shelf' %} class="on"{% endif %}>Shelf</a>
-      <a href="{% url 'devices' %}"{% if request.resolver_match.url_name == 'devices' %} class="on"{% endif %}>Devices</a>
-      <a href="{% url 'help' %}"{% if request.resolver_match.url_name == 'help' %} class="on"{% endif %}>Set up a reader</a>
+      <a href="{% url 'help' %}"{% if request.resolver_match.url_name == 'help' %} class="on"{% endif %}>Set up your reader</a>
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="link">Sign out</button></form>
     </nav>
   {% endif %}
