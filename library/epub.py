@@ -81,14 +81,18 @@ def open_epub(source) -> zipfile.ZipFile:
     if not entries:
         raise EpubError("Empty archive.")
 
-    first = entries[0]
-    if first.filename != "mimetype":
-        raise EpubError("First archive entry must be 'mimetype'.")
-    if first.compress_type != zipfile.ZIP_STORED:
-        raise EpubError("The 'mimetype' entry must be stored uncompressed.")
-    if first.file_size > 64:
+    # OCF wants ``mimetype`` first and uncompressed, so a reader can sniff the
+    # type without unzipping. Plenty of books in the wild were repacked by a
+    # tool that did not preserve that, and readers open them anyway — so the
+    # entry has to be there and say the right thing, but where it sits in the
+    # archive is not a reason to refuse a book.
+    try:
+        mimetype = zf.getinfo("mimetype")
+    except KeyError:
+        raise EpubError("No 'mimetype' entry — this is not an EPUB.") from None
+    if mimetype.file_size > 64:
         raise EpubError("The 'mimetype' entry is not a media type.")
-    if zf.read(first).strip() != b"application/epub+zip":
+    if zf.read(mimetype).strip() != b"application/epub+zip":
         raise EpubError("Media type is not application/epub+zip.")
 
     if "META-INF/container.xml" not in zf.namelist():
