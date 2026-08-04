@@ -70,6 +70,20 @@ class IngestTests(TempStorage, TestCase):
         self.assertFalse(result.ok)
         self.assertIn("mimetype", result.error)
 
+    def test_repacked_epub_with_mimetype_out_of_order_is_accepted(self):
+        """Books repacked by other tools rarely keep 'mimetype' first."""
+        original = zipfile.ZipFile(io.BytesIO(make_epub(title="Repacked")))
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for name in sorted(original.namelist()):
+                zf.writestr(name, original.read(name))
+
+        result = ingest(
+            self.user, SimpleUploadedFile("repacked.epub", buffer.getvalue())
+        )
+        self.assertTrue(result.ok, result.error)
+        self.assertEqual(result.book.title, "Repacked")
+
     def test_second_upload_by_same_owner_is_refused(self):
         payload = make_epub(title="Twice")
         first = ingest(self.user, SimpleUploadedFile("a.epub", payload))

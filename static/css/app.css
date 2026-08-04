@@ -53,6 +53,10 @@ a { color: var(--accent); }
 .bar nav a:hover, .bar nav a.on { color: var(--ink); }
 .bar nav a.on { text-decoration: underline; text-underline-offset: 4px; }
 .bar form { margin: 0; }
+/* Sign out sits among the nav links, so it reads as one of them, not as an
+   action: same muted colour, no underline. */
+.bar nav button.link { text-decoration: none; color: var(--muted); }
+.bar nav button.link:hover { color: var(--ink); }
 
 h1 { font-size: 1.5rem; margin: 1rem 0 .25rem; }
 h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
@@ -127,8 +131,6 @@ code[data-copy]::after { content: " ⧉"; color: var(--muted); }
   font-size: .8rem; color: var(--muted); border: 1px solid var(--line);
   border-radius: 999px; padding: .1rem .5rem; vertical-align: middle;
 }
-.search { display: flex; gap: .5rem; align-items: center; }
-.search input { max-width: 16rem; }
 
 .grid {
   list-style: none; padding: 0; margin: 1rem 0 0;

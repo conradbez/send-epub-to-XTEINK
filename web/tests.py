@@ -1,5 +1,6 @@
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 
 from library.ingest import ingest
 from library.models import Book, User
@@ -64,13 +65,6 @@ class ShelfTests(WebTestCase):
         self.assertContains(response, "Mine")
         self.assertNotContains(response, "Theirs")
 
-    def test_filter_matches_title_and_author(self):
-        self.add_book("Dune")
-        self.add_book("Neuromancer")
-        response = self.client.get("/", {"q": "dune"})
-        self.assertContains(response, "Dune")
-        self.assertNotContains(response, "Neuromancer")
-
     def test_delete_removes_the_book(self):
         book = self.add_book("Doomed")
         response = self.client.post(f"/book/{book.pk}/delete/", follow=True)
@@ -115,6 +109,27 @@ class CatalogLinkTests(WebTestCase):
         self.assertNotContains(response, old)
         self.assertContains(response, self.user.token)
 
+    def test_reset_puts_the_whole_shelf_back_in_the_inbox(self):
+        """A new link means a new reader, and it holds none of the books yet."""
+        delivered = self.add_book("Already Read")
+        Book.objects.filter(pk=delivered.pk).update(delivered_at=timezone.now())
+
+        self.client.post("/help/new-link/", follow=True)
+
+        delivered.refresh_from_db()
+        self.assertIsNone(delivered.delivered_at)
+
+    def test_reset_leaves_another_users_deliveries_alone(self):
+        stranger = User.objects.create_user("stranger", password="x")
+        theirs = self.add_book("Theirs", owner=stranger)
+        stamped = timezone.now()
+        Book.objects.filter(pk=theirs.pk).update(delivered_at=stamped)
+
+        self.client.post("/help/new-link/", follow=True)
+
+        theirs.refresh_from_db()
+        self.assertEqual(theirs.delivered_at, stamped)
+
     def test_another_users_link_is_never_shown(self):
         stranger = User.objects.create_user("stranger", password="x")
         self.assertNotContains(self.client.get("/help/"), stranger.token)
@@ -146,7 +161,7 @@ class HelpPageTests(WebTestCase):
         response = self.client.get("/help/")
         content = response.content.decode()
         self.assertIn("v1.3.0", content)          # TLS handshake OOM
-        self.assertIn("All Books", content)       # re-download after Inbox
+        self.assertIn("Inbox", content)           # what the reader opens on
         self.assertIn("EPUB only", content)       # nothing else is accepted
 
     def test_reports_storage_use(self):
@@ -154,4 +169,4 @@ class HelpPageTests(WebTestCase):
         response = self.client.get("/help/")
         self.assertEqual(response.context["book_count"], 1)
         self.assertGreater(response.context["blob_bytes"], 0)
-        self.assertIn("Volume", response.content.decode())
+        self.assertIn("1 book on your shelf", response.content.decode())

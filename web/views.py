@@ -5,7 +5,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import login
 from django.contrib.auth.decorators import login_required
-from django.db.models import Q, Sum
+from django.db.models import Sum
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_POST
@@ -38,20 +38,12 @@ def signup(request):
 @login_required
 def shelf(request):
     books = Book.objects.filter(owner=request.user)
-    query = request.GET.get("q", "").strip()
-    if query:
-        books = books.filter(
-            Q(title__icontains=query)
-            | Q(author__icontains=query)
-            | Q(series__icontains=query)
-        )
     return render(
         request,
         "web/shelf.html",
         {
             "books": books,
-            "query": query,
-            "total": Book.objects.filter(owner=request.user).count(),
+            "total": books.count(),
             "max_upload_mb": settings.MAX_UPLOAD_BYTES // (1024 * 1024),
         },
     )
@@ -109,11 +101,20 @@ def cover(request, pk):
 @login_required
 @require_POST
 def reset_link(request):
-    """One link per account, so rotating it is the only device management left."""
+    """One link per account, so rotating it is the only device management left.
+
+    A new link means a new reader, and a new reader holds none of the books. So
+    the shelf goes back into the Inbox: the whole library is undelivered again,
+    and the new device fills itself the same way the first one did.
+    """
     request.user.rotate_token()
+    restored = Book.objects.filter(
+        owner=request.user, delivered_at__isnull=False
+    ).update(delivered_at=None)
     messages.success(
         request,
-        "New link. The old one stopped working — paste the new one into your reader.",
+        "New link. The old one stopped working — paste the new one into your reader. "
+        f"{restored} book{'s' if restored != 1 else ''} back in the Inbox for it to download.",
     )
     return redirect("help")
 

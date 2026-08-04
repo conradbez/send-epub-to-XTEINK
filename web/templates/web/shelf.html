@@ -16,11 +16,6 @@
 
 <div class="shelf-head">
   <h1>Your shelf <span class="count">{{ total }}</span></h1>
-  <form method="get" class="search">
-    <input type="search" name="q" value="{{ query }}" placeholder="Filter by title, author, series">
-    <button type="submit">Filter</button>
-    {% if query %}<a class="link" href="{% url 'shelf' %}">Clear</a>{% endif %}
-  </form>
 </div>
 
 {% if books %}
@@ -48,9 +43,6 @@
   {% endfor %}
 </ul>
 {% else %}
-<p class="empty">
-  {% if query %}Nothing matches “{{ query }}”.
-  {% else %}Nothing here yet. Upload an EPUB above, then open <strong>Inbox</strong> on your reader.{% endif %}
-</p>
+<p class="empty">Nothing here yet. Upload an EPUB above, then open <strong>Inbox</strong> on your reader.</p>
 {% endif %}
 {% endblock %}
