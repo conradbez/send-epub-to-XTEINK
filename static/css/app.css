@@ -120,6 +120,7 @@ code[data-copy]::after { content: " ⧉"; color: var(--muted); }
   border: 2px dashed var(--line); border-radius: var(--radius);
   background: var(--panel); color: var(--muted);
 }
+.dropzone.dragover { border-color: var(--accent); background: var(--panel); color: var(--ink); }
 .dropzone strong { display: block; color: var(--ink); font-size: 1.05rem; }
 .dropzone span { display: block; font-size: .875rem; }
 .dropzone input { margin-top: .6rem; max-width: 100%; }
